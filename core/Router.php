@@ -5,6 +5,16 @@
 class Router {
     private $routes = [];
     private $notFoundCallback;
+    private $baseUrl;
+
+    /**
+     * Constructor
+     */
+    public function __construct() {
+        // Determine base URL from server variables
+        $scriptName = dirname($_SERVER['SCRIPT_NAME']);
+        $this->baseUrl = $scriptName === '/' ? '' : $scriptName;
+    }
 
     /**
      * Add a GET route
@@ -105,6 +115,23 @@ class Router {
      * @return array|false
      */
     private function match($method, $uri) {
+        // Sort routes: specific routes first, followed by dynamic routes
+        usort($this->routes, function($a, $b) {
+            // Count parameter segments
+            $aParams = substr_count($a['pattern'], ':');
+            $bParams = substr_count($b['pattern'], ':');
+
+            // If one has parameters and the other doesn't, put the one without params first
+            if ($aParams === 0 && $bParams > 0) return -1;
+            if ($aParams > 0 && $bParams === 0) return 1;
+
+            // If both have params, prefer the one with fewer params
+            if ($aParams !== $bParams) return $aParams - $bParams;
+
+            // If both have the same number of params, prefer the longer pattern
+            return strlen($b['pattern']) - strlen($a['pattern']);
+        });
+
         foreach ($this->routes as $route) {
             // Check if method matches
             if (strpos($route['method'], $method) === false) {
@@ -150,10 +177,17 @@ class Router {
         $method = $_SERVER['REQUEST_METHOD'];
         $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
-        // Remove script name from URI
-        $scriptName = dirname($_SERVER['SCRIPT_NAME']);
-        if ($scriptName !== '/') {
-            $uri = substr($uri, strlen($scriptName));
+        // Remove base path from URI
+        if ($this->baseUrl !== '' && strpos($uri, $this->baseUrl) === 0) {
+            $uri = substr($uri, strlen($this->baseUrl));
+        }
+
+        // Ensure leading slash is removed
+        $uri = ltrim($uri, '/');
+
+        // If URI is empty, treat it as the root route
+        if ($uri === '') {
+            $uri = '';
         }
 
         // Match the route

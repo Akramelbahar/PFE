@@ -2,7 +2,7 @@
 /**
  * Application Routes
  *
- * This file defines all routes for the application.
+ * This file defines all routes for the association research and innovation application.
  */
 
 // Get the router instance
@@ -138,31 +138,7 @@ $router->post('events/create', function() {
     $controller->store();
 });
 
-$router->get('events/:id', function($id) {
-    $controller = new EventController();
-    $controller->view($id);
-});
-
-$router->get('events/edit/:id', function($id) {
-    $controller = new EventController();
-    $controller->edit($id);
-});
-
-$router->post('events/edit/:id', function($id) {
-    $controller = new EventController();
-    $controller->update($id);
-});
-
-$router->post('events/delete/:id', function($id) {
-    $controller = new EventController();
-    $controller->delete($id);
-});
-
-$router->post('events/delete-document/:id/:filename', function($id, $filename) {
-    $controller = new EventController();
-    $controller->deleteDocument($id, $filename);
-});
-
+// These specific routes need to come before the generic :id route
 $router->get('events/seminaires', function() {
     $controller = new EventController();
     $controller->seminaires();
@@ -186,6 +162,32 @@ $router->get('events/search', function() {
 $router->get('events/json', function() {
     $controller = new EventController();
     $controller->getEventsJson();
+});
+
+// Generic ID routes for events
+$router->get('events/:id', function($id) {
+    $controller = new EventController();
+    $controller->view($id);
+});
+
+$router->get('events/edit/:id', function($id) {
+    $controller = new EventController();
+    $controller->edit($id);
+});
+
+$router->post('events/edit/:id', function($id) {
+    $controller = new EventController();
+    $controller->update($id);
+});
+
+$router->post('events/delete/:id', function($id) {
+    $controller = new EventController();
+    $controller->delete($id);
+});
+
+$router->post('events/delete-document/:id/:filename', function($id, $filename) {
+    $controller = new EventController();
+    $controller->deleteDocument($id, $filename);
 });
 
 // Project routes
@@ -276,7 +278,7 @@ $router->post('contact', function() {
     $controller->send();
 });
 
-// Ideas routes
+// Research Ideas routes
 $router->get('ideas', function() {
     $controller = new IdeeRechercheController();
     $controller->index();
@@ -290,6 +292,17 @@ $router->get('ideas/create', function() {
 $router->post('ideas/create', function() {
     $controller = new IdeeRechercheController();
     $controller->store();
+});
+
+// Specific routes need to come before generic :id routes
+$router->get('ideas/create-project/:id', function($id) {
+    $controller = new IdeeRechercheController();
+    $controller->createProject($id);
+});
+
+$router->post('ideas/create-project/:id', function($id) {
+    $controller = new IdeeRechercheController();
+    $controller->storeProject($id);
 });
 
 $router->get('ideas/:id', function($id) {
@@ -320,16 +333,6 @@ $router->post('ideas/delete/:id', function($id) {
 $router->post('ideas/delete-document/:id/:filename', function($id, $filename) {
     $controller = new IdeeRechercheController();
     $controller->deleteDocument($id, $filename);
-});
-
-$router->get('ideas/create-project/:id', function($id) {
-    $controller = new IdeeRechercheController();
-    $controller->createProject($id);
-});
-
-$router->post('ideas/create-project/:id', function($id) {
-    $controller = new IdeeRechercheController();
-    $controller->storeProject($id);
 });
 
 // Admin routes
