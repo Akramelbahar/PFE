@@ -420,7 +420,7 @@ class IdeeRechercheController extends Controller {
      */
     public function updateStatus($id) {
         // Ensure user has right permissions
-        if (!$this->requireAuth(['admin', 'membreBureauExecutif'])) {
+        if (!$this->requirePermission('approve_idea')) {
             return;
         }
 
@@ -440,7 +440,6 @@ class IdeeRechercheController extends Controller {
         // Get new status
         $status = $this->getInput('status');
         $commentaire = $this->getInput('commentaire');
-        $projetId = $this->getInput('projet_id');
 
         // Validate status
         $validStatuses = ['Soumise', 'En évaluation', 'Approuvée', 'Rejetée'];
@@ -450,26 +449,20 @@ class IdeeRechercheController extends Controller {
             return;
         }
 
-        // If approving and linking to a project, validate project
-        if ($status === 'Approuvée' && $projetId) {
-            $projetModel = new ProjetRecherche();
-            $projet = $projetModel->find($projetId);
-
-            if (!$projet) {
-                $this->setFlash('error', 'Le projet sélectionné n\'existe pas.');
-                $this->redirect('ideas/' . $id);
-                return;
-            }
-        }
-
         // Update idea status
         $updated = $ideeModel->update($id, [
             'status' => $status,
             'commentaire' => $commentaire,
-            'projetId' => $projetId
+            'evaluateurId' => $this->auth->getUser()['id'],
+            'dateEvaluation' => date('Y-m-d H:i:s')
         ]);
 
         if ($updated) {
+            // Send notification to the idea proposer
+            if ($status === 'Approuvée' || $status === 'Rejetée') {
+                $this->notifyProposer($idea, $status, $commentaire);
+            }
+
             $this->setFlash('success', 'Le statut de l\'idée a été mis à jour avec succès.');
         } else {
             $this->setFlash('error', 'Une erreur est survenue lors de la mise à jour du statut.');
@@ -745,4 +738,36 @@ class IdeeRechercheController extends Controller {
         $this->setFlash('success', 'Le projet a été créé avec succès à partir de l\'idée.');
         $this->redirect('projects/' . $projectId);
     }
+
+
+    /**
+     * Send notification to idea proposer
+     * @param array $idea Idea data
+     * @param string $status New status
+     * @param string $commentaire Evaluation comment
+     */
+    private function notifyProposer($idea, $status, $commentaire) {
+        // Get proposer details
+        $userModel = new Utilisateur();
+        $proposer = $userModel->find($idea['proposePar']);
+
+        if (!$proposer) {
+            return;
+        }
+
+        // In a real application, send email notification
+        // This is just a placeholder
+        $subject = 'Mise à jour de votre idée de recherche';
+        $message = "Bonjour " . $proposer['prenom'] . ",\n\n";
+        $message .= "Votre idée de recherche \"" . $idea['titre'] . "\" a été " . strtolower($status) . ".\n\n";
+
+        if (!empty($commentaire)) {
+            $message .= "Commentaire de l'évaluateur : " . $commentaire . "\n\n";
+        }
+
+        $message .= "Vous pouvez consulter les détails sur la plateforme.\n\n";
+        $message .= "Cordialement,\nAssociation Recherche et Innovation";
+
+        // mail($proposer['email'], $subject, $message);
+        }
 }

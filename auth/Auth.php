@@ -1,6 +1,7 @@
 <?php
 /**
  * Authentication and Authorization Class
+ * Manages user authentication and permission checking for the association app
  */
 class Auth {
     private static $instance = null;
@@ -8,14 +9,23 @@ class Auth {
     private $user = null;
     private $roles = [];
 
+    /**
+     * Constructor - Private for singleton pattern
+     */
     private function __construct() {
         $this->db = Db::getInstance();
         $this->checkSession();
     }
 
-    // Prevent cloning
+    /**
+     * Prevent cloning of the singleton
+     */
     private function __clone() {}
 
+    /**
+     * Get singleton instance
+     * @return Auth
+     */
     public static function getInstance() {
         if (self::$instance === null) {
             self::$instance = new self();
@@ -203,18 +213,24 @@ class Auth {
 
         // Check for executive board member with specific permissions
         if (in_array('membreBureauExecutif', $this->roles)) {
-            $stmt = $this->db->prepare("SELECT permissions FROM MembreBureauExecutif WHERE utilisateurId = :id LIMIT 1");
+            $stmt = $this->db->prepare("SELECT role, permissions FROM MembreBureauExecutif WHERE utilisateurId = :id LIMIT 1");
             $stmt->execute(['id' => $this->user['id']]);
             $membreBureau = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($membreBureau) {
+                // Check if member has all permissions (wildcard)
+                if (strpos($membreBureau['permissions'], '*') !== false) {
+                    return true;
+                }
+
+                // Check specific permissions
                 $permissions = explode(',', $membreBureau['permissions']);
-                if (in_array($permission, $permissions) || in_array('*', $permissions)) {
+                if (in_array($permission, $permissions)) {
                     return true;
                 }
 
                 // President and Vice President have all permissions
-                if (in_array('president', $this->roles) || in_array('vicepresident', $this->roles)) {
+                if (in_array(strtolower($membreBureau['role']), ['president', 'vicepresident'])) {
                     return true;
                 }
             }
@@ -248,6 +264,14 @@ class Auth {
     }
 
     /**
+     * Get user ID
+     * @return int|null
+     */
+    public function getUserId() {
+        return $this->user ? $this->user['id'] : null;
+    }
+
+    /**
      * Get user roles
      * @return array
      */
@@ -275,5 +299,118 @@ class Auth {
         $stmt = $this->db->prepare("SELECT COUNT(*) FROM Utilisateur WHERE email = :email");
         $stmt->execute(['email' => $email]);
         return $stmt->fetchColumn() > 0;
+    }
+
+    /**
+     * Get bureau role for the current user
+     * @return string|null Role name or null if not a bureau member
+     */
+    public function getBureauRole() {
+        if (!$this->isLoggedIn() || !$this->hasRole('membreBureauExecutif')) {
+            return null;
+        }
+
+        $stmt = $this->db->prepare("SELECT role FROM MembreBureauExecutif WHERE utilisateurId = :id LIMIT 1");
+        $stmt->execute(['id' => $this->user['id']]);
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $result ? $result['role'] : null;
+    }
+
+    /**
+     * Check if current user has a specific bureau role
+     * @param string|array $role Bureau role(s) to check
+     * @return bool
+     */
+    public function hasBureauRole($role) {
+        $bureauRole = $this->getBureauRole();
+        if (!$bureauRole) {
+            return false;
+        }
+
+        if (is_array($role)) {
+            return in_array($bureauRole, $role);
+        }
+
+        return $bureauRole === $role;
+    }
+
+    /**
+     * Get human-readable role name for display
+     * @param string $role Machine role name
+     * @return string Human-readable role name
+     */
+    public function getBureauRoleLabel($role) {
+        $roleLabels = [
+            'President' => 'Président',
+            'VicePresident' => 'Vice-président',
+            'GeneralSecretary' => 'Secrétaire Général',
+            'Treasurer' => 'Trésorier',
+            'ViceTreasurer' => 'Vice-trésorier',
+            'Counselor' => 'Conseiller'
+        ];
+
+        return $roleLabels[$role] ?? $role;
+    }
+
+    /**
+     * Get all permissions for current user
+     * @return array
+     */
+    public function getAllPermissions() {
+        if (!$this->isLoggedIn()) {
+            return [];
+        }
+
+        // Admin has all permissions
+        if (in_array('admin', $this->roles)) {
+            return ['*'];
+        }
+
+        $permissions = [];
+
+        // Check for executive board member permissions
+        if (in_array('membreBureauExecutif', $this->roles)) {
+            $stmt = $this->db->prepare("
+                SELECT role, permissions 
+                FROM MembreBureauExecutif 
+                WHERE utilisateurId = :id LIMIT 1
+            ");
+            $stmt->execute(['id' => $this->user['id']]);
+            $membreBureau = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($membreBureau) {
+                // Check if member has wildcard permissions
+                if (strpos($membreBureau['permissions'], '*') !== false) {
+                    return ['*'];
+                }
+
+                // Get specific permissions
+                $bureauPermissions = explode(',', $membreBureau['permissions']);
+                $permissions = array_merge($permissions, $bureauPermissions);
+
+                // President and Vice President have all permissions
+                if (in_array(strtolower($membreBureau['role']), ['president', 'vicepresident'])) {
+                    return ['*'];
+                }
+            }
+        }
+
+        // Add role-based permissions
+        $rolePermissions = [
+            'chercheur' => [
+                'view_publications', 'add_publication', 'edit_own_publication', 'delete_own_publication',
+                'view_events', 'register_event', 'propose_idea',
+                'view_projects', 'participate_project'
+            ]
+        ];
+
+        foreach ($this->roles as $userRole) {
+            if (isset($rolePermissions[$userRole])) {
+                $permissions = array_merge($permissions, $rolePermissions[$userRole]);
+            }
+        }
+
+        return array_unique($permissions);
     }
 }

@@ -10,6 +10,59 @@ class AuthController extends Controller {
     /**
      * Login page
      */
+    // Update to the hasPermission method in Auth.php
+    public function hasPermission($permission) {
+        if (!$this->isLoggedIn()) {
+            return false;
+        }
+
+        // Admin has all permissions
+        if (in_array('admin', $this->roles)) {
+            return true;
+        }
+
+        // Check for executive board member with specific permissions
+        if (in_array('membreBureauExecutif', $this->roles)) {
+            $stmt = $this->db->prepare("SELECT role, permissions FROM MembreBureauExecutif WHERE utilisateurId = :id LIMIT 1");
+            $stmt->execute(['id' => $this->user['id']]);
+            $membreBureau = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($membreBureau) {
+                // Check if member has all permissions (President)
+                if (strpos($membreBureau['permissions'], '*') !== false) {
+                    return true;
+                }
+
+                // Check specific role permissions
+                $permissions = explode(',', $membreBureau['permissions']);
+                if (in_array($permission, $permissions)) {
+                    return true;
+                }
+
+                // President and Vice President have all permissions
+                if (in_array(strtolower($membreBureau['role']), ['president', 'vicepresident'])) {
+                    return true;
+                }
+            }
+        }
+
+        // Check role-based permissions
+        $rolePermissions = [
+            'chercheur' => [
+                'view_publications', 'add_publication', 'edit_own_publication', 'delete_own_publication',
+                'view_events', 'register_event', 'propose_idea',
+                'view_projects', 'participate_project'
+            ]
+        ];
+
+        foreach ($this->roles as $userRole) {
+            if (isset($rolePermissions[$userRole]) && in_array($permission, $rolePermissions[$userRole])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
     public function login() {
         // If already logged in, redirect to home
         if ($this->auth->isLoggedIn()) {

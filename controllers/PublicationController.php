@@ -9,11 +9,13 @@ require_once './utils/FileManager.php';
 /**
  * Publication Controller
  */
-class PublicationController extends Controller {
+class PublicationController extends Controller
+{
     /**
      * Publications index page
      */
-    public function index() {
+    public function index()
+    {
         // Get filter parameters
         $type = $this->getInput('type');
         $author = $this->getInput('author');
@@ -40,7 +42,8 @@ class PublicationController extends Controller {
     }
 
 
-    private function getPublications($type = null, $author = null, $year = null, $search = null) {
+    private function getPublications($type = null, $author = null, $year = null, $search = null)
+    {
         $db = Db::getInstance();
 
         $params = [];
@@ -107,7 +110,8 @@ class PublicationController extends Controller {
     }
 
 
-    private function getPublicationFilters() {
+    private function getPublicationFilters()
+    {
         $db = Db::getInstance();
         $filters = [];
 
@@ -135,7 +139,8 @@ class PublicationController extends Controller {
     }
 
 
-    public function view($id) {
+    public function view($id)
+    {
         // Get publication with author
         $publicationModel = new Publication();
         $publication = $publicationModel->findWithAuthor($id);
@@ -161,7 +166,8 @@ class PublicationController extends Controller {
         ]);
     }
 
-    private function getPublicationType($id) {
+    private function getPublicationType($id)
+    {
         $db = Db::getInstance();
 
         $stmt = $db->prepare("SELECT COUNT(*) FROM Article WHERE publicationId = :id");
@@ -186,7 +192,8 @@ class PublicationController extends Controller {
     }
 
 
-    private function getPublicationDetails($id, $type) {
+    private function getPublicationDetails($id, $type)
+    {
         $db = Db::getInstance();
 
         if ($type === 'Article') {
@@ -224,7 +231,8 @@ class PublicationController extends Controller {
         return null;
     }
 
-    private function getRelatedPublications($publication) {
+    private function getRelatedPublications($publication)
+    {
         $db = Db::getInstance();
 
         // Get publications from same author
@@ -258,7 +266,8 @@ class PublicationController extends Controller {
     }
 
 
-    public function create() {
+    public function create()
+    {
         // Ensure user is authenticated
         if (!$this->requireAuth()) {
             return;
@@ -275,7 +284,8 @@ class PublicationController extends Controller {
     }
 
 
-    public function store() {
+    public function store()
+    {
         // Ensure user is authenticated
         if (!$this->requireAuth()) {
             return;
@@ -381,7 +391,8 @@ class PublicationController extends Controller {
     }
 
 
-    public function edit($id) {
+    public function edit($id)
+    {
         // Ensure user is authenticated
         if (!$this->requireAuth()) {
             return;
@@ -420,7 +431,8 @@ class PublicationController extends Controller {
     }
 
 
-    public function update($id) {
+    public function update($id)
+    {
         // Ensure user is authenticated
         if (!$this->requireAuth()) {
             return;
@@ -515,7 +527,8 @@ class PublicationController extends Controller {
     }
 
 
-    public function delete($id) {
+    public function delete($id)
+    {
         // Ensure user is authenticated
         if (!$this->requireAuth()) {
             return;
@@ -563,7 +576,8 @@ class PublicationController extends Controller {
     }
 
 
-    public function deleteDocument($id, $filename) {
+    public function deleteDocument($id, $filename)
+    {
         // Ensure user is authenticated
         if (!$this->requireAuth()) {
             return;
@@ -629,7 +643,8 @@ class PublicationController extends Controller {
     }
 
 
-    private function handleDocumentUploads() {
+    private function handleDocumentUploads()
+    {
         $documents = [];
 
         // Check if there are document uploads
@@ -654,7 +669,8 @@ class PublicationController extends Controller {
     }
 
 
-    private function deletePublicationFiles($publication) {
+    private function deletePublicationFiles($publication)
+    {
         if (!empty($publication['documents'])) {
             $documents = json_decode($publication['documents'], true);
 
@@ -668,4 +684,159 @@ class PublicationController extends Controller {
         }
     }
 
+    /**
+     * Submit a publication for approval
+     * @param int $id Publication ID
+     */
+    public function submit($id)
+    {
+        // Ensure user is authenticated
+        if (!$this->requireAuth()) {
+            return;
+        }
+
+        // Get publication
+        $publicationModel = new Publication();
+        $publication = $publicationModel->find($id);
+
+        if (!$publication) {
+            $this->renderNotFound();
+            return;
+        }
+
+        // Check if user is author
+        if ($publication['auteurId'] != $this->auth->getUser()['id']) {
+            $this->renderForbidden();
+            return;
+        }
+
+        // Check if form was submitted
+        if (!$this->isPost()) {
+            $this->redirect('publications/' . $id);
+            return;
+        }
+
+        // Update status to submitted
+        $updated = $publicationModel->updateStatus($id, 'submitted');
+
+        if ($updated) {
+            $this->setFlash('success', 'Votre publication a été soumise pour approbation.');
+        } else {
+            $this->setFlash('error', 'Une erreur est survenue lors de la soumission.');
+        }
+
+        $this->redirect('publications/' . $id);
+    }
+
+    /**
+     * Review a publication (admin or board members only)
+     * @param int $id Publication ID
+     */
+    public function review($id)
+    {
+        // Ensure user has permission
+        if (!$this->requirePermission('approve_publication')) {
+            return;
+        }
+
+        // Get publication
+        $publicationModel = new Publication();
+        $publication = $publicationModel->findWithAuthor($id);
+
+        if (!$publication) {
+            $this->renderNotFound();
+            return;
+        }
+
+        // Check if form was submitted
+        if (!$this->isPost()) {
+            $this->redirect('publications/' . $id);
+            return;
+        }
+
+        // Get form data
+        $status = $this->getInput('status');
+        $comments = $this->getInput('comments');
+
+        // Validate status
+        $validStatuses = ['under_review', 'approved', 'rejected'];
+        if (!in_array($status, $validStatuses)) {
+            $this->setFlash('error', 'Statut invalide.');
+            $this->redirect('publications/' . $id);
+            return;
+        }
+
+        // Update publication status
+        $updated = $publicationModel->updateStatus($id, $status, $this->auth->getUser()['id'], $comments);
+
+        if ($updated) {
+            // Send notification to author
+            if ($status === 'approved' || $status === 'rejected') {
+                $this->notifyAuthor($publication, $status, $comments);
+            }
+
+            $statusLabel = $publicationModel->getStatusLabel($status);
+            $this->setFlash('success', 'La publication a été marquée comme "' . $statusLabel . '".');
+        } else {
+            $this->setFlash('error', 'Une erreur est survenue lors de la mise à jour du statut.');
+        }
+
+        $this->redirect('admin/publications/pending');
+    }
+
+    /**
+     * List publications pending approval (admin or board members only)
+     */
+    public function pending()
+    {
+        // Ensure user has permission
+        if (!$this->requirePermission('approve_publication')) {
+            return;
+        }
+
+        $publicationModel = new Publication();
+        $pendingPublications = $publicationModel->getPendingApproval();
+
+        $this->render('admin/publications_pending', [
+            'pageTitle' => 'Publications en attente d\'approbation',
+            'publications' => $pendingPublications
+        ]);
+    }
+
+    /**
+     * Send notification to author
+     * @param array $publication Publication data
+     * @param string $status New status
+     * @param string $comments Review comments
+     */
+    private function notifyAuthor($publication, $status, $comments)
+    {
+        // Get author details
+        $userModel = new Utilisateur();
+        $author = $userModel->find($publication['auteurId']);
+
+        if (!$author) {
+            return;
+        }
+
+        // In a real application, send email notification
+        // This is just a placeholder
+        $subject = 'Mise à jour de votre publication';
+        $message = "Bonjour " . $author['prenom'] . ",\n\n";
+
+        if ($status === 'approved') {
+            $message .= "Votre publication \"" . $publication['titre'] . "\" a été approuvée.\n\n";
+        } else {
+            $message .= "Votre publication \"" . $publication['titre'] . "\" a été rejetée.\n\n";
+        }
+
+        if (!empty($comments)) {
+            $message .= "Commentaires du réviseur : " . $comments . "\n\n";
+        }
+
+        $message .= "Vous pouvez consulter les détails sur la plateforme.\n\n";
+        $message .= "Cordialement,\nAssociation Recherche et Innovation";
+
+        // mail($author['email'], $subject, $message);
+    }
 }
