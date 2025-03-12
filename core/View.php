@@ -27,26 +27,26 @@ class View {
      * Initializes the base path for templates
      */
     public function __construct() {
-        // Determine the base path for templates
         $config = Config::getInstance();
-        $this->basePath = $this->normalizePath(
-            $config->get('paths.templates', dirname(__DIR__) . '/views')
-        );
+
+        // Get the relative templates path from config
+        $templatesPath = $config->get('paths.templates', './views/');
+
+        // Normalize the path
+        $this->basePath = $this->normalizePath($templatesPath);
     }
 
     /**
-     * Normalize and validate file path
+     * Normalize path for consistent usage
      * @param string $path
      * @return string
      */
     private function normalizePath($path) {
-        // Remove any trailing slashes
-        $path = rtrim($path, '/\\');
+        // Remove leading './' or '/'
+        $path = preg_replace('/^(\.\/)?(\/)?/', '', $path);
 
-        // Resolve relative paths
-        $path = realpath($path) ?: $path;
-
-        return $path . '/';
+        // Ensure trailing slash
+        return './' . rtrim($path, '/') . '/';
     }
 
     /**
@@ -77,31 +77,40 @@ class View {
      * @throws Exception If template file is not found
      */
     public function render($template, $data = []) {
+        // Merge global and local data
         $viewData = array_merge($this->globalData, $data);
 
         // Resolve template file path
         $templatePath = $this->resolveTemplatePath($template);
-        echo $templatePath ;
+
         // Validate template file
-        echo $this->validateTemplateFile($templatePath);
+        $this->validateTemplateFile($templatePath);
 
         // Start output buffering
         ob_start();
 
         // Extract view data to create local variables
         extract($viewData);
-        require $templatePath;
 
-        // Capture template content
-        $content = ob_get_clean();
+        try {
+            // Include the template file
+            require $templatePath;
 
-        // Render with layout if enabled
-        if ($this->layout !== null) {
-            $content = $this->renderWithLayout($content, $viewData);
+            // Capture template content
+            $content = ob_get_clean();
+
+            // Render with layout if enabled
+            if ($this->layout !== null) {
+                $content = $this->renderWithLayout($content, $viewData);
+            }
+
+            // Output final content
+            echo $content;
+        } catch (Exception $e) {
+            // Capture any rendering errors
+            ob_end_clean();
+            throw $e;
         }
-
-        // Output final content
-        echo $content;
     }
 
     /**
@@ -140,12 +149,15 @@ class View {
      * @return string Full path to template file
      */
     private function resolveTemplatePath($template) {
-        // Ensure .php extension
-        $template = str_replace('\\', '/', $template);
-        $template = rtrim($template, '/');
-        $templateFile = $this->basePath . $template . (strpos($template, '.php') === false ? '.php' : '');
-        return $templateFile;
+        // Normalize template path
+        $template = str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $template);
+        $template = trim($template, DIRECTORY_SEPARATOR);
 
+        // Construct relative path
+        $templateFile = $this->basePath . $template .
+            (strpos($template, '.php') === false ? '.php' : '');
+
+        return $templateFile;
     }
 
     /**
@@ -155,12 +167,7 @@ class View {
      */
     private function validateTemplateFile($path) {
         if (!file_exists($path)) {
-            // Detailed error logging
-            error_log("Template file not found: {$path}");
-            error_log("Base path: {$this->basePath}");
-            error_log("Current working directory: " . getcwd());
-
-            throw new Exception("Template file not found: {$path}");
+            throw new Exception("Template file not found: $path");
         }
     }
 
@@ -215,7 +222,6 @@ class View {
             $dateTime = new DateTime($date);
             return $dateTime->format($format);
         } catch (Exception $e) {
-            error_log("Date formatting error: " . $e->getMessage());
             return $date;
         }
     }

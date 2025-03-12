@@ -33,6 +33,7 @@ class Config {
     /**
      * Load configuration from files
      */
+
     private function loadConfig() {
         // Default configuration
         $this->config = [
@@ -58,9 +59,9 @@ class Config {
                 ],
             ],
             'paths' => [
-                'uploads' => './public/uploads',
-                'templates' =>  './views',
-                'logs' => './logs',
+                'uploads' => './public/uploads/',
+                'templates' => './views/',
+                'logs' => './logs/',
             ],
             'security' => [
                 'password_hash_algo' => PASSWORD_DEFAULT,
@@ -79,7 +80,7 @@ class Config {
 
         // Load environment-specific configuration
         $env = getenv('APP_ENV') ?: 'development';
-        $envConfigFile =  "./config/environments/{$env}.php";
+        $envConfigFile = "./config/environments/{$env}.php";
 
         if (file_exists($envConfigFile)) {
             $envConfig = require $envConfigFile;
@@ -93,6 +94,7 @@ class Config {
             $this->mergeConfig($localConfig);
         }
     }
+
 
     /**
      * Merge configuration arrays recursively
