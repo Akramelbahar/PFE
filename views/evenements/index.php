@@ -1,184 +1,199 @@
 <!-- views/evenements/index.php -->
-<div class="events-page">
+<div class="events-index-page">
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h1>Événements</h1>
-        <?php if ($auth->hasPermission('create_event')): ?>
+        <h1>Tous les Événements</h1>
+        <?php if ($auth->hasPermission('register_event')): ?>
             <a href="<?php echo $this->url('events/create'); ?>" class="btn btn-primary">
-                <i class="fas fa-plus"></i> Nouvel événement
+                <i class="fas fa-plus"></i> Créer un événement
             </a>
         <?php endif; ?>
     </div>
 
-    <!-- Filters -->
+    <!-- Quick Navigation -->
+    <div class="row mb-4">
+        <div class="col-md-4 mb-2">
+            <a href="<?php echo $this->url('events/seminaires'); ?>" class="card text-decoration-none">
+                <div class="card-body text-center">
+                    <i class="fas fa-chalkboard-teacher fa-3x text-primary mb-3"></i>
+                    <h5 class="card-title">Séminaires</h5>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-4 mb-2">
+            <a href="<?php echo $this->url('events/conferences'); ?>" class="card text-decoration-none">
+                <div class="card-body text-center">
+                    <i class="fas fa-users fa-3x text-success mb-3"></i>
+                    <h5 class="card-title">Conférences</h5>
+                </div>
+            </a>
+        </div>
+        <div class="col-md-4 mb-2">
+            <a href="<?php echo $this->url('events/workshops'); ?>" class="card text-decoration-none">
+                <div class="card-body text-center">
+                    <i class="fas fa-laptop-code fa-3x text-warning mb-3"></i>
+                    <h5 class="card-title">Ateliers</h5>
+                </div>
+            </a>
+        </div>
+    </div>
+
+    <!-- Events Calendar -->
     <div class="card mb-4">
-        <div class="card-header bg-light">
-            <h5 class="mb-0">Filtres</h5>
+        <div class="card-header bg-primary text-white">
+            <h4 class="mb-0">Calendrier des Événements</h4>
         </div>
         <div class="card-body">
-            <form action="<?php echo $this->url('events'); ?>" method="get" class="row g-3">
-                <div class="col-md-3">
-                    <label for="type" class="form-label">Type</label>
-                    <select name="type" id="type" class="form-select">
-                        <option value="">Tous les types</option>
-                        <option value="Seminaire" <?php echo isset($_GET['type']) && $_GET['type'] === 'Seminaire' ? 'selected' : ''; ?>>Séminaire</option>
-                        <option value="Conference" <?php echo isset($_GET['type']) && $_GET['type'] === 'Conference' ? 'selected' : ''; ?>>Conférence</option>
-                        <option value="Workshop" <?php echo isset($_GET['type']) && $_GET['type'] === 'Workshop' ? 'selected' : ''; ?>>Workshop</option>
-                    </select>
-                </div>
-                <div class="col-md-3">
-                    <label for="period" class="form-label">Période</label>
-                    <select name="period" id="period" class="form-select">
-                        <option value="">Toutes les périodes</option>
-                        <option value="past" <?php echo isset($_GET['period']) && $_GET['period'] === 'past' ? 'selected' : ''; ?>>Événements passés</option>
-                        <option value="upcoming" <?php echo isset($_GET['period']) && $_GET['period'] === 'upcoming' ? 'selected' : ''; ?>>Événements à venir</option>
-                    </select>
-                </div>
-                <div class="col-md-4">
-                    <label for="search" class="form-label">Recherche</label>
-                    <input type="text" name="search" id="search" class="form-control" placeholder="Titre, lieu, description..." value="<?php echo isset($_GET['search']) ? $this->escape($_GET['search']) : ''; ?>">
-                </div>
-                <div class="col-md-2 d-flex align-items-end">
-                    <button type="submit" class="btn btn-primary w-100">Filtrer</button>
-                </div>
-            </form>
+            <div id="events-calendar"></div>
         </div>
     </div>
 
-    <!-- Calendar View Toggle -->
-    <div class="d-flex justify-content-end mb-3">
-        <div class="btn-group" role="group">
-            <button type="button" class="btn btn-outline-primary active" id="list-view-btn">
-                <i class="fas fa-list"></i> Liste
-            </button>
-            <button type="button" class="btn btn-outline-primary" id="calendar-view-btn">
-                <i class="fas fa-calendar-alt"></i> Calendrier
-            </button>
-        </div>
-    </div>
-
-    <!-- List View -->
-    <div id="list-view">
-        <?php if (empty($events)): ?>
-            <div class="alert alert-info">
-                Aucun événement trouvé. Veuillez modifier vos critères de recherche ou <a href="<?php echo $this->url('events/create'); ?>">créer un nouvel événement</a>.
+    <!-- Upcoming Events -->
+    <div class="card">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+            <h4 class="mb-0">Liste des Événements</h4>
+            <div class="btn-group" role="group">
+                <input type="radio" class="btn-check" name="event-view" id="grid-view" autocomplete="off" checked>
+                <label class="btn btn-outline-light" for="grid-view">
+                    <i class="fas fa-th"></i>
+                </label>
+                <input type="radio" class="btn-check" name="event-view" id="list-view" autocomplete="off">
+                <label class="btn btn-outline-light" for="list-view">
+                    <i class="fas fa-list"></i>
+                </label>
             </div>
-        <?php else: ?>
-            <!-- Event Cards -->
-            <div class="row">
-                <?php foreach ($events as $event): ?>
-                    <div class="col-md-4 mb-4">
-                        <div class="card h-100">
-                            <div class="card-header d-flex justify-content-between">
-                                <span class="badge <?php
-                                switch($event['type']) {
-                                    case 'Seminaire':
-                                        echo 'bg-info';
-                                        break;
-                                    case 'Conference':
-                                        echo 'bg-primary';
-                                        break;
-                                    case 'Workshop':
-                                        echo 'bg-success';
-                                        break;
-                                    default:
-                                        echo 'bg-secondary';
-                                }
-                                ?>"><?php echo $this->escape($event['type']); ?></span>
+        </div>
 
-                                <?php
-                                // Display appropriate date based on event type
-                                $eventDate = '';
-                                if ($event['type'] === 'Seminaire') {
-                                    $eventDate = $this->formatDate($event['date'] ?? '', 'd/m/Y');
-                                } else {
-                                    $startDate = $this->formatDate($event['dateDebut'] ?? '', 'd/m/Y');
-                                    $endDate = isset($event['dateFin']) ? $this->formatDate($event['dateFin'], 'd/m/Y') : '';
-                                    $eventDate = $startDate . ($endDate && $startDate !== $endDate ? ' - ' . $endDate : '');
+        <div id="events-grid-view" class="row g-4 p-3">
+            <?php if (empty($events)): ?>
+                <div class="col-12">
+                    <div class="alert alert-info text-center">
+                        Aucun événement trouvé.
+                    </div>
+                </div>
+            <?php else: ?>
+                <?php foreach ($events as $event): ?>
+                    <div class="col-md-4">
+                        <div class="card h-100">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span class="badge bg-<?php
+                                switch ($event['type']) {
+                                    case 'Seminaire': echo 'info'; break;
+                                    case 'Conference': echo 'success'; break;
+                                    case 'Workshop': echo 'warning'; break;
+                                    default: echo 'secondary';
                                 }
-                                ?>
-                                <span><?php echo $eventDate; ?></span>
+                                ?>">
+                                    <?php echo $this->escape($event['type']); ?>
+                                </span>
+                                <small class="text-muted">
+                                    <?php echo $this->formatDate($event['eventDate'], 'd/m/Y'); ?>
+                                </small>
                             </div>
                             <div class="card-body">
                                 <h5 class="card-title"><?php echo $this->escape($event['titre']); ?></h5>
-                                <p class="card-text"><?php echo $this->truncate($event['description'], 100); ?></p>
                                 <p class="card-text">
-                                    <strong><i class="fas fa-map-marker-alt"></i></strong> <?php echo $this->escape($event['lieu']); ?>
+                                    <?php echo $this->truncate($event['description'], 100); ?>
+                                </p>
+                                <p class="text-muted">
+                                    <i class="fas fa-map-marker-alt"></i>
+                                    <?php echo $this->escape($event['lieu']); ?>
                                 </p>
                             </div>
-                            <div class="card-footer bg-white">
-                                <a href="<?php echo $this->url('events/' . $event['id']); ?>" class="btn btn-primary btn-sm">
-                                    <i class="fas fa-eye"></i> Détails
+                            <div class="card-footer bg-white d-flex justify-content-between align-items-center">
+                                <small class="text-muted">
+                                    Créé par <?php echo $this->escape($event['createurPrenom'] . ' ' . $event['createurNom']); ?>
+                                </small>
+                                <a href="<?php echo $this->url('events/' . $event['id']); ?>"
+                                   class="btn btn-sm btn-outline-primary">
+                                    Détails
                                 </a>
-
-                                <?php if ($auth->getUser() && ($auth->hasPermission('edit_event') || $event['createurId'] == $auth->getUser()['id'])): ?>
-                                    <a href="<?php echo $this->url('events/edit/' . $event['id']); ?>" class="btn btn-warning btn-sm">
-                                        <i class="fas fa-edit"></i> Modifier
-                                    </a>
-                                <?php endif; ?>
                             </div>
                         </div>
                     </div>
                 <?php endforeach; ?>
-            </div>
-        <?php endif; ?>
-    </div>
+            <?php endif; ?>
+        </div>
 
-    <!-- Calendar View (hidden by default) -->
-    <div id="calendar-view" style="display: none;">
-        <div class="card">
-            <div class="card-body">
-                <div id="events-calendar"></div>
-            </div>
+        <div id="events-list-view" class="table-responsive" style="display:none;">
+            <table class="table table-hover mb-0">
+                <thead>
+                <tr>
+                    <th>Titre</th>
+                    <th>Type</th>
+                    <th>Date</th>
+                    <th>Lieu</th>
+                    <th>Créateur</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($events as $event): ?>
+                    <tr>
+                        <td><?php echo $this->escape($event['titre']); ?></td>
+                        <td>
+                                <span class="badge bg-<?php
+                                switch ($event['type']) {
+                                    case 'Seminaire': echo 'info'; break;
+                                    case 'Conference': echo 'success'; break;
+                                    case 'Workshop': echo 'warning'; break;
+                                    default: echo 'secondary';
+                                }
+                                ?>">
+                                    <?php echo $this->escape($event['type']); ?>
+                                </span>
+                        </td>
+                        <td><?php echo $this->formatDate($event['eventDate'], 'd/m/Y'); ?></td>
+                        <td><?php echo $this->escape($event['lieu']); ?></td>
+                        <td><?php echo $this->escape($event['createurPrenom'] . ' ' . $event['createurNom']); ?></td>
+                        <td>
+                            <a href="<?php echo $this->url('events/' . $event['id']); ?>"
+                               class="btn btn-sm btn-outline-primary">
+                                <i class="fas fa-eye"></i>
+                            </a>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
         </div>
     </div>
 </div>
 
-<!-- Include FullCalendar library -->
-<link href="https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/main.min.css" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.10.0/main.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@5.10.2/main.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@5.10.2/main.min.css" rel="stylesheet">
 
 <script>
     document.addEventListener('DOMContentLoaded', function() {
-        // FullCalendar initialization
+        // View toggle
+        const gridViewRadio = document.getElementById('grid-view');
+        const listViewRadio = document.getElementById('list-view');
+        const gridView = document.getElementById('events-grid-view');
+        const listView = document.getElementById('events-list-view');
+
+        gridViewRadio.addEventListener('change', function() {
+            gridView.style.display = 'flex';
+            listView.style.display = 'none';
+        });
+
+        listViewRadio.addEventListener('change', function() {
+            gridView.style.display = 'none';
+            listView.style.display = 'table-row-group';
+        });
+
+        // Calendar initialization
         var calendarEl = document.getElementById('events-calendar');
-
-        var calendar = new FullCalendar.Calendar(calendarEl, {
-            initialView: 'dayGridMonth',
-            headerToolbar: {
-                left: 'prev,next today',
-                center: 'title',
-                right: 'dayGridMonth,timeGridWeek,listMonth'
-            },
-            events: '<?php echo $this->url('events/json'); ?>',
-            eventClick: function(info) {
-                window.location.href = info.event.url;
-            },
-            eventColor: '#3788d8',
-            eventTimeFormat: {
-                hour: '2-digit',
-                minute: '2-digit',
-                hour12: false
-            },
-            firstDay: 1, // Monday as first day
-            locale: 'fr'
-        });
-
-        calendar.render();
-
-        // View toggle handlers
-        document.getElementById('list-view-btn').addEventListener('click', function() {
-            document.getElementById('list-view').style.display = 'block';
-            document.getElementById('calendar-view').style.display = 'none';
-            this.classList.add('active');
-            document.getElementById('calendar-view-btn').classList.remove('active');
-        });
-
-        document.getElementById('calendar-view-btn').addEventListener('click', function() {
-            document.getElementById('list-view').style.display = 'none';
-            document.getElementById('calendar-view').style.display = 'block';
-            this.classList.add('active');
-            document.getElementById('list-view-btn').classList.remove('active');
-            calendar.updateSize(); // Ensure calendar renders properly
-        });
+        fetch('<?php echo $this->url('events/json'); ?>')
+            .then(response => response.json())
+            .then(events => {
+                var calendar = new FullCalendar.Calendar(calendarEl, {
+                    initialView: 'dayGridMonth',
+                    locale: 'fr',
+                    events: events,
+                    eventClick: function(info) {
+                        window.location.href = info.event.extendedProps.url;
+                    }
+                });
+                calendar.render();
+            });
     });
 </script>

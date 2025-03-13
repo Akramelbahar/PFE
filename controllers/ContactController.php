@@ -29,7 +29,7 @@ class ContactController extends Controller {
         // Get form data
         $nom = $this->getInput('nom');
         $email = $this->getInput('email');
-        $telephone = $this->getInput('telephone');
+        $telephone = $this->getInput('telephone', '');
         $sujet = $this->getInput('sujet');
         $message = $this->getInput('message');
 
@@ -64,27 +64,68 @@ class ContactController extends Controller {
 
         // Store contact message
         $contactModel = new Contact();
-        $contactId = $contactModel->create([
+
+        try {
+            $contactData = [
+                'nom' => $nom,
+                'email' => $email,
+                'message' => $message,
+                'dateEnvoi' => date('Y-m-d H:i:s'),
+                'status' => 'Non lu'
+            ];
+
+            // Only add telephone and sujet if they exist in the database schema
+            if ($this->columnExists('Contact', 'telephone')) {
+                $contactData['telephone'] = $telephone;
+            }
+
+            if ($this->columnExists('Contact', 'sujet')) {
+                $contactData['sujet'] = $sujet;
+            }
+
+            $contactId = $contactModel->create($contactData);
+
+            if ($contactId) {
+                // Send notification to admins
+                $contact = $contactModel->find($contactId);
+                $contactModel->sendNotification($contact);
+
+                $this->setFlash('success', 'Votre message a été envoyé avec succès. Nous vous répondrons dans les plus brefs délais.');
+                $this->redirect('contact');
+                return;
+            }
+        } catch (Exception $e) {
+            // Log the error for debugging
+            error_log('Error saving contact: ' . $e->getMessage());
+        }
+
+        // If we reach here, there was an error
+        $this->setFlash('error', 'Une erreur est survenue lors de l\'envoi de votre message. Veuillez réessayer.');
+        $this->render('contact/index', [
+            'pageTitle' => 'Contact',
             'nom' => $nom,
             'email' => $email,
             'telephone' => $telephone,
             'sujet' => $sujet,
-            'message' => $message,
-            'dateEnvoi' => date('Y-m-d H:i:s'),
-            'status' => 'Non lu'
+            'message' => $message
         ]);
+    }
 
-        if ($contactId) {
-            // Send notification to admins
-            $contact = $contactModel->find($contactId);
-            $contactModel->sendNotification($contact);
-
-            $this->setFlash('success', 'Votre message a été envoyé avec succès. Nous vous répondrons dans les plus brefs délais.');
-        } else {
-            $this->setFlash('error', 'Une erreur est survenue lors de l\'envoi de votre message. Veuillez réessayer.');
+    /**
+     * Check if a column exists in a table
+     * @param string $table
+     * @param string $column
+     * @return bool
+     */
+    private function columnExists($table, $column) {
+        try {
+            $db = Db::getInstance();
+            $stmt = $db->prepare("SHOW COLUMNS FROM `$table` LIKE :column");
+            $stmt->execute(['column' => $column]);
+            return $stmt->rowCount() > 0;
+        } catch (PDOException $e) {
+            return false;
         }
-
-        $this->redirect('contact');
     }
 
     /**
@@ -103,7 +144,6 @@ class ContactController extends Controller {
         $dateTo = $this->getInput('date_to');
 
         // Get contacts
-        $contactModel = new Contact();
         $contacts = $this->getFilteredContacts($status, $search, $dateFrom, $dateTo);
 
         $this->render('contact/list', [
@@ -141,8 +181,24 @@ class ContactController extends Controller {
         }
 
         if ($search) {
-            $conditions[] = "(nom LIKE :search OR email LIKE :search OR sujet LIKE :search OR message LIKE :search)";
-            $params['search'] = '%' . $search . '%';
+            // Check which columns exist in the table
+            $searchColumns = [];
+            $potentialColumns = ['nom', 'email', 'sujet', 'message'];
+
+            foreach ($potentialColumns as $column) {
+                if ($this->columnExists('Contact', $column)) {
+                    $searchColumns[] = $column;
+                }
+            }
+
+            if (!empty($searchColumns)) {
+                $searchConditions = [];
+                foreach ($searchColumns as $column) {
+                    $searchConditions[] = "$column LIKE :search";
+                }
+                $conditions[] = "(" . implode(" OR ", $searchConditions) . ")";
+                $params['search'] = '%' . $search . '%';
+            }
         }
 
         if ($dateFrom) {
@@ -170,8 +226,13 @@ class ContactController extends Controller {
             $stmt->bindValue(':' . $key, $value);
         }
 
-        $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        try {
+            $stmt->execute();
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            error_log('Database error in getFilteredContacts: ' . $e->getMessage());
+            return [];
+        }
     }
 
     /**
@@ -195,23 +256,30 @@ class ContactController extends Controller {
         // Mark as read if not already
         if ($contact['status'] === 'Non lu') {
             $contactModel->update($id, ['status' => 'Lu']);
-            $contactModel->markAsRead($id, $this->auth->getUser()['id']);
+
+            // Only call markAsRead if the ContactReponse table exists
+            if ($this->tableExists('ContactReponse')) {
+                $contactModel->markAsRead($id, $this->auth->getUser()['id']);
+            }
         }
 
-        // Get response if exists
-        $db = Db::getInstance();
-        $stmt = $db->prepare("
-            SELECT cr.*, u.nom as repondeurNom, u.prenom as repondeurPrenom
-            FROM ContactReponse cr
-            LEFT JOIN Utilisateur u ON cr.userId = u.id
-            WHERE cr.contactId = :contactId
-            ORDER BY cr.dateReponse DESC
-        ");
-        $stmt->execute(['contactId' => $id]);
-        $responses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        // Get responses if the ContactReponse table exists
+        $responses = [];
+        if ($this->tableExists('ContactReponse')) {
+            $db = Db::getInstance();
+            $stmt = $db->prepare("
+                SELECT cr.*, u.nom as repondeurNom, u.prenom as repondeurPrenom
+                FROM ContactReponse cr
+                LEFT JOIN Utilisateur u ON cr.userId = u.id
+                WHERE cr.contactId = :contactId
+                ORDER BY cr.dateReponse DESC
+            ");
+            $stmt->execute(['contactId' => $id]);
+            $responses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
 
         $this->render('contact/view', [
-            'pageTitle' => 'Message: ' . $contact['sujet'],
+            'pageTitle' => 'Message: ' . ($contact['sujet'] ?? 'Sans sujet'),
             'contact' => $contact,
             'responses' => $responses
         ]);
@@ -250,16 +318,41 @@ class ContactController extends Controller {
             return;
         }
 
+        // Ensure ContactReponse table exists
+        if (!$this->tableExists('ContactReponse')) {
+            $contactModel->createContactResponseTable();
+        }
+
         // Store reply
-        $contactModel->markAsRead($id, $this->auth->getUser()['id'], $reponse);
-        $contactModel->update($id, ['status' => 'Répondu']);
+        $success = $contactModel->markAsRead($id, $this->auth->getUser()['id'], $reponse);
+        if ($success) {
+            $contactModel->update($id, ['status' => 'Répondu']);
 
-        // In a real application, send the response email here
-        // Example code:
-        // mail($contact['email'], 'Re: ' . $contact['sujet'], $reponse);
+            // In a real application, send the response email here
+            // Example code:
+            // mail($contact['email'], 'Re: ' . ($contact['sujet'] ?? 'Votre message'), $reponse);
 
-        $this->setFlash('success', 'Votre réponse a été envoyée avec succès.');
-        $this->redirect('admin/contacts');
+            $this->setFlash('success', 'Votre réponse a été envoyée avec succès.');
+        } else {
+            $this->setFlash('error', 'Une erreur est survenue lors de l\'envoi de votre réponse.');
+        }
+
+        $this->redirect('admin/contacts/' . $id);
+    }
+
+    /**
+     * Check if a table exists
+     * @param string $table
+     * @return bool
+     */
+    private function tableExists($table) {
+        try {
+            $db = Db::getInstance();
+            $stmt = $db->query("SHOW TABLES LIKE '$table'");
+            return $stmt->rowCount() > 0;
+        } catch (PDOException $e) {
+            return false;
+        }
     }
 
     /**
@@ -285,10 +378,12 @@ class ContactController extends Controller {
             return;
         }
 
-        // First delete any responses
-        $db = Db::getInstance();
-        $stmt = $db->prepare("DELETE FROM ContactReponse WHERE contactId = :id");
-        $stmt->execute(['id' => $id]);
+        // First delete any responses if the table exists
+        if ($this->tableExists('ContactReponse')) {
+            $db = Db::getInstance();
+            $stmt = $db->prepare("DELETE FROM ContactReponse WHERE contactId = :id");
+            $stmt->execute(['id' => $id]);
+        }
 
         // Then delete the contact message
         $deleted = $contactModel->delete($id);
@@ -327,15 +422,32 @@ class ContactController extends Controller {
 
         // Delete messages
         $db = Db::getInstance();
+        $deleted = false;
 
-        // First delete responses
-        $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $stmt = $db->prepare("DELETE FROM ContactReponse WHERE contactId IN ($placeholders)");
-        $stmt->execute($ids);
+        try {
+            // Start transaction
+            $db->beginTransaction();
 
-        // Then delete contacts
-        $stmt = $db->prepare("DELETE FROM Contact WHERE id IN ($placeholders)");
-        $deleted = $stmt->execute($ids);
+            // First delete responses if the table exists
+            if ($this->tableExists('ContactReponse')) {
+                $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                $stmt = $db->prepare("DELETE FROM ContactReponse WHERE contactId IN ($placeholders)");
+                $stmt->execute($ids);
+            }
+
+            // Then delete contacts
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $stmt = $db->prepare("DELETE FROM Contact WHERE id IN ($placeholders)");
+            $stmt->execute($ids);
+
+            // Commit transaction
+            $db->commit();
+            $deleted = true;
+        } catch (PDOException $e) {
+            // Rollback on error
+            $db->rollBack();
+            error_log('Error in bulkDelete: ' . $e->getMessage());
+        }
 
         if ($deleted) {
             $this->setFlash('success', count($ids) . ' message(s) ont été supprimés avec succès.');

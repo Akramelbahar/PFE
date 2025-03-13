@@ -407,41 +407,12 @@ $router->notFound(function() {
     $view = new View();
     $view->render('errors/not_found');
 });
-// Bureau management routes
-$router->get('admin/bureau', function() {
-    $controller = new MembreBureauExecutifController();
+$router->get('search', function() {
+    $controller = new SearchController();
     $controller->index();
 });
 
-$router->get('admin/bureau/create', function() {
-    $controller = new MembreBureauExecutifController();
-    $controller->create();
-});
 
-$router->post('admin/bureau/create', function() {
-    $controller = new MembreBureauExecutifController();
-    $controller->store();
-});
 
-$router->get('admin/bureau/edit/:id', function($id) {
-    $controller = new MembreBureauExecutifController();
-    $controller->edit($id);
-});
-
-$router->post('admin/bureau/edit/:id', function($id) {
-    $controller = new MembreBureauExecutifController();
-    $controller->update($id);
-});
-
-$router->post('admin/bureau/delete/:id', function($id) {
-    $controller = new MembreBureauExecutifController();
-    $controller->delete($id);
-});
-
-// Ideas management in admin area
-$router->get('admin/ideas', function() {
-    $controller = new AdminController();
-    $controller->ideas();
-});
 // Return the configured router
 return $router;

@@ -49,9 +49,9 @@ class Evenement extends Model {
      */
     public function getAllWithTypes() {
         $query = "
-            SELECT e.*, 
+            SELECT e.*,
                 CASE 
-                    WHEN s.evenementId IS NOT NULL THEN 'Seminaire' 
+                    WHEN s.evenementId IS NOT NULL THEN 'Seminaire'
                     WHEN c.evenementId IS NOT NULL THEN 'Conference'
                     WHEN w.evenementId IS NOT NULL THEN 'Workshop'
                     ELSE 'Standard'
@@ -60,9 +60,54 @@ class Evenement extends Model {
             LEFT JOIN Seminaire s ON e.id = s.evenementId
             LEFT JOIN Conference c ON e.id = c.evenementId
             LEFT JOIN Workshop w ON e.id = w.evenementId
+            ORDER BY e.dateCreation DESC
         ";
 
         $stmt = $this->db->query($query);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Get upcoming events
+     * @param int $limit Number of events to retrieve
+     * @return array
+     */
+    public function getUpcomingEvents($limit = 5) {
+        $query = "
+            (SELECT e.*, s.date as eventDate, 'Seminaire' as eventType
+            FROM Evenement e
+            JOIN Seminaire s ON e.id = s.evenementId
+            WHERE s.date >= NOW()
+            ORDER BY s.date ASC
+            LIMIT :limit)
+            
+            UNION
+            
+            (SELECT e.*, c.dateDebut as eventDate, 'Conference' as eventType
+            FROM Evenement e
+            JOIN Conference c ON e.id = c.evenementId
+            WHERE c.dateDebut >= NOW()
+            ORDER BY c.dateDebut ASC
+            LIMIT :limit)
+            
+            UNION
+            
+            (SELECT e.*, w.dateDebut as eventDate, 'Workshop' as eventType
+            FROM Evenement e
+            JOIN Workshop w ON e.id = w.evenementId
+            WHERE w.dateDebut >= NOW()
+            ORDER BY w.dateDebut ASC
+            LIMIT :limit)
+            
+            ORDER BY eventDate ASC
+            LIMIT :final_limit
+        ";
+
+        $stmt = $this->db->prepare($query);
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->bindValue(':final_limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 }

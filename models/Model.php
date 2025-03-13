@@ -24,14 +24,41 @@ abstract class Model {
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    public function create(array $data) {
-        $columns = implode(', ', array_keys($data));
-        $placeholders = ':' . implode(', :', array_keys($data));
+    public function create($data)
+    {
+        // Remove any keys that are not actual database columns
+        $filteredData = array_filter($data, function ($key) {
+            // Exclude 'type' and any other non-database columns
+            return $key !== 'type' &&
+                $key !== 'type_label' &&
+                $key !== 'type_color';
+        }, ARRAY_FILTER_USE_KEY);
 
-        $stmt = $this->db->prepare("INSERT INTO {$this->table} ({$columns}) VALUES ({$placeholders})");
-        $stmt->execute($data);
+        // Prepare the SQL query
+        $columns = implode(', ', array_keys($filteredData));
+        $placeholders = ':' . implode(', :', array_keys($filteredData));
 
-        return $this->db->lastInsertId();
+        $query = "INSERT INTO {$this->table} ({$columns}) VALUES ({$placeholders})";
+
+        try {
+            $stmt = $this->db->prepare($query);
+
+            // Bind parameters
+            foreach ($filteredData as $key => $value) {
+                $stmt->bindValue(':' . $key, $value);
+            }
+
+            // Execute the query
+            if ($stmt->execute()) {
+                return $this->db->lastInsertId();
+            }
+
+            return false;
+        } catch (PDOException $e) {
+            // Log the error
+            error_log('Create error in ' . get_class($this) . ': ' . $e->getMessage());
+            return false;
+        }
     }
 
     public function update($id, array $data) {
@@ -57,4 +84,12 @@ abstract class Model {
         $stmt->execute(['value' => $value]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
+
+    /**
+     * Create a new record
+     * @param array $data
+     * @return int|false
+     */
+
 }
+

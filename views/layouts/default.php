@@ -106,6 +106,9 @@
                 <?php endif; ?>
             </ul>
         </div>
+        <div class="ms-auto me-3">
+            <?php include 'views/partials/search-box.php'; ?>
+        </div>
     </div>
 </nav>
 

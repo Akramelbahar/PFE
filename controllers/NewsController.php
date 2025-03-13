@@ -22,12 +22,61 @@ class NewsController extends Controller {
      * News index page
      */
     public function index() {
+        // Get search parameters
+        $search = $this->getInput('search');
+        $sort = $this->getInput('sort', 'recent');
+
+        // Get pagination parameters
+        $page = max(1, intval($this->getInput('page', 1)));
+        $perPage = 12; // Number of items per page
+
         $actualiteModel = new Actualite();
-        $news = $actualiteModel->getAllWithAuthorDetails();
+
+        // Apply search if provided
+        if (!empty($search)) {
+            $news = $actualiteModel->search($search);
+        } else {
+            // Apply sorting
+            switch ($sort) {
+                case 'oldest':
+                    $news = $actualiteModel->getAllWithAuthorDetails('a.datePublication ASC');
+                    break;
+                case 'title':
+                    $news = $actualiteModel->getAllWithAuthorDetails('a.titre ASC');
+                    break;
+                case 'recent':
+                default:
+                    $news = $actualiteModel->getAllWithAuthorDetails('a.datePublication DESC');
+                    break;
+            }
+        }
+
+        // Pagination
+        $totalItems = count($news);
+        $totalPages = ceil($totalItems / $perPage);
+
+        // Ensure valid page number
+        if ($page > $totalPages && $totalPages > 0) {
+            $page = $totalPages;
+        }
+
+        // Get items for current page
+        $startIndex = ($page - 1) * $perPage;
+        $news = array_slice($news, $startIndex, $perPage);
+
+        $pagination = [
+            'currentPage' => $page,
+            'totalPages' => $totalPages,
+            'perPage' => $perPage,
+            'totalItems' => $totalItems
+        ];
 
         $this->render('news/index', [
             'pageTitle' => 'Actualités',
-            'news' => $news
+            'news' => $news,
+            'pagination' => $pagination,
+            'search' => $search,
+            'sort' => $sort
         ]);
     }
 
@@ -47,11 +96,54 @@ class NewsController extends Controller {
         // Get related news (exclude current)
         $relatedNews = $this->getRelatedNews($news);
 
+        // Get related event if exists
+        $relatedEvent = null;
+        if (!empty($news['evenementId']) && class_exists('Evenement')) {
+            $evenementModel = new Evenement();
+            $relatedEvent = $evenementModel->find($news['evenementId']);
+
+            // Add event type info if available
+            if ($relatedEvent) {
+                $eventType = $this->getEventType($relatedEvent['id']);
+                $relatedEvent['type'] = $eventType;
+            }
+        }
+
         $this->render('news/view', [
             'pageTitle' => $news['titre'],
             'news' => $news,
-            'relatedNews' => $relatedNews
+            'relatedNews' => $relatedNews,
+            'relatedEvent' => $relatedEvent
         ]);
+    }
+
+    /**
+     * Determine event type
+     * @param int $eventId
+     * @return string
+     */
+    private function getEventType($eventId) {
+        $db = Db::getInstance();
+
+        $stmt = $db->prepare("SELECT COUNT(*) FROM Seminaire WHERE evenementId = :id");
+        $stmt->execute(['id' => $eventId]);
+        if ($stmt->fetchColumn() > 0) {
+            return 'Séminaire';
+        }
+
+        $stmt = $db->prepare("SELECT COUNT(*) FROM Conference WHERE evenementId = :id");
+        $stmt->execute(['id' => $eventId]);
+        if ($stmt->fetchColumn() > 0) {
+            return 'Conférence';
+        }
+
+        $stmt = $db->prepare("SELECT COUNT(*) FROM Workshop WHERE evenementId = :id");
+        $stmt->execute(['id' => $eventId]);
+        if ($stmt->fetchColumn() > 0) {
+            return 'Workshop';
+        }
+
+        return 'Événement';
     }
 
     /**
@@ -119,8 +211,13 @@ class NewsController extends Controller {
         }
 
         // Get events for relation
-        $evenementModel = new Evenement();
-        $events = $evenementModel->getAllWithTypes();
+        $events = [];
+        if (class_exists('Evenement')) {
+            $evenementModel = new Evenement();
+            if (method_exists($evenementModel, 'getAllWithTypes')) {
+                $events = $evenementModel->getAllWithTypes();
+            }
+        }
 
         $this->render('news/create', [
             'pageTitle' => 'Créer une Actualité',
@@ -172,35 +269,70 @@ class NewsController extends Controller {
 
         // Handle image upload
         $image = $this->getFile('image');
-        $imageUrl = null;
+        $mediaUrl = null;
 
         if ($image && $image['error'] === UPLOAD_ERR_OK) {
             $uploadResult = $this->fileManager->upload($image);
             if ($uploadResult) {
-                $imageUrl = $uploadResult['path'];
+                $mediaUrl = $uploadResult['path'];
             }
         }
 
         // Create news
-        $actualiteModel = new Actualite();
-        $newsId = $actualiteModel->create([
-            'titre' => $titre,
-            'contenu' => $contenu,
-            'imageUrl' => $imageUrl,
-            'auteurId' => $this->auth->getUser()['id'],
-            'datePublication' => date('Y-m-d H:i:s'),
-            'evenementId' => $evenementId
-        ]);
+        try {
+            $db = Db::getInstance();
+            $db->beginTransaction();
 
-        if ($newsId) {
-            $this->setFlash('success', 'L\'actualité a été créée avec succès.');
-            $this->redirect('news/' . $newsId);
-        } else {
-            $this->setFlash('error', 'Une erreur est survenue lors de la création de l\'actualité.');
+            // Prepare data
+            $newsData = [
+                'titre' => $titre,
+                'contenu' => $contenu,
+                'mediaUrl' => $mediaUrl,
+                'auteurId' => $this->auth->getUser()['id'],
+                'datePublication' => date('Y-m-d H:i:s'),
+                'evenementId' => $evenementId
+            ];
+
+            // Create SQL query
+            $columns = implode(', ', array_keys($newsData));
+            $placeholders = ':' . implode(', :', array_keys($newsData));
+
+            $query = "INSERT INTO Actualite ({$columns}) VALUES ({$placeholders})";
+            $stmt = $db->prepare($query);
+
+            foreach ($newsData as $key => $value) {
+                $stmt->bindValue(':' . $key, $value);
+            }
+
+            $stmt->execute();
+            $newsId = $db->lastInsertId();
+
+            $db->commit();
+
+            if ($newsId) {
+                $this->setFlash('success', 'L\'actualité a été créée avec succès.');
+                $this->redirect('news/' . $newsId);
+            } else {
+                throw new Exception('Failed to get last insert ID');
+            }
+        } catch (Exception $e) {
+            // Log the specific error
+            error_log('News creation error: ' . $e->getMessage());
+
+            if (isset($db)) {
+                $db->rollBack();
+            }
+
+            $this->setFlash('error', 'Une erreur est survenue lors de la création de l\'actualité: ' . $e->getMessage());
             $this->redirect('news/create');
         }
     }
-
+// Add this helper method to your NewsController class
+    private function columnExists($table, $column) {
+        $db = Db::getInstance();
+        $stmt = $db->query("SHOW COLUMNS FROM {$table} LIKE '{$column}'");
+        return $stmt->rowCount() > 0;
+    }
     /**
      * Edit news form
      * @param int $id News ID
@@ -231,8 +363,13 @@ class NewsController extends Controller {
         }
 
         // Get events for relation
-        $evenementModel = new Evenement();
-        $events = $evenementModel->getAllWithTypes();
+        $events = [];
+        if (class_exists('Evenement')) {
+            $evenementModel = new Evenement();
+            if (method_exists($evenementModel, 'getAllWithTypes')) {
+                $events = $evenementModel->getAllWithTypes();
+            }
+        }
 
         $this->render('news/edit', [
             'pageTitle' => 'Modifier l\'actualité: ' . $news['titre'],
@@ -241,6 +378,10 @@ class NewsController extends Controller {
         ]);
     }
 
+    /**
+     * Update news
+     * @param int $id News ID
+     */
     /**
      * Update news
      * @param int $id News ID
@@ -279,6 +420,7 @@ class NewsController extends Controller {
         $titre = $this->getInput('titre');
         $contenu = $this->getInput('contenu');
         $evenementId = $this->getInput('evenement_id') ?: null;
+        $removeImage = $this->getInput('remove_image') ? true : false;
 
         // Validate input
         $validation = $this->validate(
@@ -305,16 +447,23 @@ class NewsController extends Controller {
             'evenementId' => $evenementId
         ];
 
+        // Handle image removal if requested
+        if ($removeImage && !empty($news['mediaUrl'])) {
+            $this->fileManager->delete(basename($news['mediaUrl']));
+            $data['mediaUrl'] = null;
+        }
         // Handle image upload if provided
-        $image = $this->getFile('image');
-        if ($image && $image['error'] === UPLOAD_ERR_OK) {
-            $uploadResult = $this->fileManager->upload($image);
-            if ($uploadResult) {
-                $data['imageUrl'] = $uploadResult['path'];
+        else {
+            $image = $this->getFile('image');
+            if ($image && $image['error'] === UPLOAD_ERR_OK) {
+                $uploadResult = $this->fileManager->upload($image);
+                if ($uploadResult) {
+                    $data['mediaUrl'] = $uploadResult['path'];
 
-                // Delete old image if exists
-                if (!empty($news['imageUrl'])) {
-                    $this->fileManager->delete(basename($news['imageUrl']));
+                    // Delete old image if exists
+                    if (!empty($news['mediaUrl'])) {
+                        $this->fileManager->delete(basename($news['mediaUrl']));
+                    }
                 }
             }
         }
@@ -330,7 +479,6 @@ class NewsController extends Controller {
             $this->redirect('news/edit/' . $id);
         }
     }
-
     /**
      * Delete news
      * @param int $id News ID
@@ -366,8 +514,8 @@ class NewsController extends Controller {
         }
 
         // Delete image if exists
-        if (!empty($news['imageUrl'])) {
-            $this->fileManager->delete(basename($news['imageUrl']));
+        if (!empty($news['mediaUrl'])) {
+            $this->fileManager->delete(basename($news['mediaUrl']));
         }
 
         // Delete news

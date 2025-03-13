@@ -29,13 +29,37 @@ class Conference extends Evenement {
      */
     public function getAllWithDetails() {
         $query = "
-            SELECT c.*, e.*, u.nom as createurNom, u.prenom as createurPrenom
+            SELECT c.*, e.*, 
+                   u.nom as createurNom, 
+                   u.prenom as createurPrenom
             FROM Conference c
             JOIN Evenement e ON c.evenementId = e.id
             LEFT JOIN Utilisateur u ON e.createurId = u.id
+            ORDER BY c.dateDebut DESC
         ";
 
         $stmt = $this->db->query($query);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Find conference by ID with additional details
+     * @param int $id
+     * @return array|false
+     */
+    public function findWithDetails($id) {
+        $query = "
+            SELECT c.*, e.*, 
+                   u.nom as createurNom, 
+                   u.prenom as createurPrenom
+            FROM Conference c
+            JOIN Evenement e ON c.evenementId = e.id
+            LEFT JOIN Utilisateur u ON e.createurId = u.id
+            WHERE c.evenementId = :id
+        ";
+
+        $stmt = $this->db->prepare($query);
+        $stmt->execute(['id' => $id]);
+        return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 }

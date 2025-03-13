@@ -370,49 +370,4 @@ class AdminController extends Controller {
 
         $this->redirect('admin/settings');
     }
-
-    /**
-     * Bureau executives management
-     */
-    public function bureau() {
-        // Ensure user is admin
-        if (!$this->requireAuth(['admin', 'membreBureauExecutif'])) {
-            return;
-        }
-
-        $membreModel = new MembreBureauExecutif();
-        $bureauMembers = $membreModel->getAllWithUserDetails();
-
-        $this->render('admin/bureau', [
-            'pageTitle' => 'Gestion du Bureau Exécutif',
-            'bureauMembers' => $bureauMembers
-        ]);
-    }
-
-    /**
-     * Research ideas approval dashboard
-     */
-    public function ideas() {
-        // Ensure user has right permissions
-        if (!$this->requirePermission('approve_idea')) {
-            return;
-        }
-
-        $ideeModel = new IdeeRecherche();
-        $ideas = $ideeModel->getAllWithProposerDetails();
-
-        // Filter by status if requested
-        $status = $this->getInput('status');
-        if ($status) {
-            $ideas = array_filter($ideas, function($idea) use ($status) {
-                return $idea['status'] === $status;
-            });
-        }
-
-        $this->render('admin/ideas', [
-            'pageTitle' => 'Gestion des Idées de Recherche',
-            'ideas' => $ideas,
-            'currentStatus' => $status
-        ]);
-    }
 }

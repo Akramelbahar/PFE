@@ -255,22 +255,133 @@ class UserController extends Controller {
     /**
      * List all users (admin only)
      */
+    /**
+     * List all users (admin only)
+     */
     public function index() {
         // Ensure user is an admin
         if (!$this->requireAuth('admin')) {
             return;
         }
 
+        // Get filter parameters
+        $role = $this->getInput('role');
+        $status = $this->getInput('status');
+        $search = $this->getInput('search');
+
         // Get all users with roles
         $utilisateurModel = new Utilisateur();
-        $users = $utilisateurModel->getAllWithRoles();
 
-        $this->render('user/index', [
+        // Get base users query
+        $query = "
+        SELECT u.*, 
+            CASE 
+                WHEN a.utilisateurId IS NOT NULL THEN 'admin' 
+                WHEN c.utilisateurId IS NOT NULL THEN 'chercheur'
+                WHEN m.utilisateurId IS NOT NULL THEN 'membreBureauExecutif'
+                ELSE 'standard'
+            END as role
+        FROM Utilisateur u
+        LEFT JOIN Admin a ON u.id = a.utilisateurId
+        LEFT JOIN Chercheur c ON u.id = c.utilisateurId
+        LEFT JOIN MembreBureauExecutif m ON u.id = m.utilisateurId
+        WHERE 1=1
+    ";
+
+        $params = [];
+        $conditions = [];
+
+        // Apply role filter
+        if (!empty($role)) {
+            switch ($role) {
+                case 'admin':
+                    $conditions[] = "a.utilisateurId IS NOT NULL";
+                    break;
+                case 'chercheur':
+                    $conditions[] = "c.utilisateurId IS NOT NULL";
+                    break;
+                case 'membreBureauExecutif':
+                    $conditions[] = "m.utilisateurId IS NOT NULL";
+                    break;
+            }
+        }
+
+        // Apply status filter
+        if ($status !== null && $status !== '') {
+            $conditions[] = "u.status = :status";
+            $params['status'] = (int)$status;
+        }
+
+        // Apply search filter
+        if (!empty($search)) {
+            $conditions[] = "(u.nom LIKE :search OR u.prenom LIKE :search OR u.email LIKE :search)";
+            $params['search'] = "%{$search}%";
+        }
+
+        // Combine conditions
+        if (!empty($conditions)) {
+            $query .= " AND " . implode(" AND ", $conditions);
+        }
+
+        // Order by registration date
+        $query .= " ORDER BY u.dateInscription DESC";
+
+        // Prepare and execute query
+        $stmt = $this->db->prepare($query);
+
+        // Bind parameters
+        foreach ($params as $key => $value) {
+            $stmt->bindValue(':' . $key, $value);
+        }
+
+        $stmt->execute();
+        $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Enrich users with additional roles
+        foreach ($users as &$user) {
+            // Fetch detailed roles
+            $userRoles = [];
+
+            // Check admin
+            $stmt = $this->db->prepare("SELECT * FROM Admin WHERE utilisateurId = :id");
+            $stmt->execute(['id' => $user['id']]);
+            if ($stmt->fetch()) {
+                $userRoles[] = 'admin';
+            }
+
+            // Check researcher
+            $stmt = $this->db->prepare("SELECT * FROM Chercheur WHERE utilisateurId = :id");
+            $stmt->execute(['id' => $user['id']]);
+            if ($stmt->fetch()) {
+                $userRoles[] = 'chercheur';
+            }
+
+            // Check executive board member
+            $stmt = $this->db->prepare("SELECT * FROM MembreBureauExecutif WHERE utilisateurId = :id");
+            $stmt->execute(['id' => $user['id']]);
+            $membreBureau = $stmt->fetch();
+            if ($membreBureau) {
+                $userRoles[] = 'membreBureauExecutif';
+                // Add specific board member role if exists
+                if (!empty($membreBureau['role'])) {
+                    $userRoles[] = strtolower($membreBureau['role']);
+                }
+            }
+
+            $user['roles'] = $userRoles;
+        }
+
+        // Render the view with users and current filters
+        $this->render('admin/users', [
             'pageTitle' => 'Gestion des utilisateurs',
-            'users' => $users
+            'users' => $users,
+            'filters' => [
+                'role' => $role,
+                'status' => $status,
+                'search' => $search
+            ]
         ]);
     }
-
     /**
      * Create new user (admin only)
      */
