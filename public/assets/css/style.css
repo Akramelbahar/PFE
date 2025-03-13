@@ -1,0 +1,255 @@
+/**
+ * Custom styles for Association Recherche et Innovation
+ * These styles complement Bootstrap, not replace it
+ */
+
+/* ---------- GENERAL STYLES ---------- */
+body {
+    color: #333;
+    font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+main {
+    flex: 1 0 auto;
+}
+
+/* Apply shadow to cards for better visual separation */
+.card {
+    transition: all 0.2s ease-in-out;
+}
+
+.card:hover {
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+/* Improved spacing and readability */
+h1, h2, h3, h4 {
+    margin-bottom: 0.8rem;
+    font-weight: 500;
+}
+
+/* ---------- HEADER & NAVIGATION ---------- */
+.navbar-brand img {
+    margin-right: 10px;
+}
+
+.dropdown-menu {
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+/* ---------- HOME PAGE ---------- */
+.hero-section {
+    padding: 5rem 2rem;
+    background-image: linear-gradient(135deg, #0d6efd, #0b5ed7);
+    margin-bottom: 2rem;
+    border-radius: 0.5rem;
+}
+
+.hero-section h1 {
+    font-weight: 700;
+    margin-bottom: 1rem;
+}
+
+/* Card enhancements */
+.card-footer {
+    background-color: transparent;
+}
+
+/* ---------- ADMIN DASHBOARD ---------- */
+.admin-dashboard .card {
+    border-left: 4px solid;
+    margin-bottom: 1.5rem;
+}
+
+.admin-dashboard .card-primary {
+    border-left-color: #0d6efd;
+}
+
+.admin-dashboard .card-success {
+    border-left-color: #198754;
+}
+
+.admin-dashboard .card-info {
+    border-left-color: #0dcaf0;
+}
+
+.admin-dashboard .card-warning {
+    border-left-color: #ffc107;
+}
+
+.admin-dashboard .card-danger {
+    border-left-color: #dc3545;
+}
+
+.admin-dashboard .display-4 {
+    font-size: 2.5rem;
+    font-weight: 700;
+}
+
+.admin-dashboard .text-uppercase {
+    letter-spacing: 0.5px;
+}
+
+/* ---------- PROFILE & USER ---------- */
+.avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    font-weight: 600;
+}
+
+.avatar-sm {
+    width: 32px;
+    height: 32px;
+    font-size: 0.875rem;
+}
+
+.avatar-lg {
+    width: 56px;
+    height: 56px;
+    font-size: 1.25rem;
+}
+
+/* ---------- FORMS ---------- */
+.form-control:focus, .form-select:focus {
+    border-color: #86b7fe;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+
+/* ---------- PUBLICATIONS ---------- */
+.publications-list .badge {
+    font-size: 0.75rem;
+    padding: 0.35em 0.65em;
+}
+
+/* ---------- EVENTS ---------- */
+.event-card .badge {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+}
+
+/* ---------- RESEARCH IDEAS ---------- */
+.idea-status-badge {
+    font-size: 0.875rem;
+    padding: 0.4em 0.8em;
+}
+
+/* ---------- UTILITIES ---------- */
+.bg-light-subtle {
+    background-color: rgba(248, 249, 250, 0.5);
+}
+
+/* Custom text truncation */
+.text-truncate-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.text-truncate-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ---------- TABLES ---------- */
+.table th {
+    font-weight: 600;
+    background-color: rgba(0, 0, 0, 0.03);
+}
+
+/* ---------- SIDEBAR (ADMIN) ---------- */
+#admin-sidebar {
+    min-height: 100vh;
+    border-right: 1px solid #dee2e6;
+}
+
+#admin-sidebar .nav-link {
+    padding: 0.5rem 1rem;
+    color: #495057;
+    border-left: 3px solid transparent;
+}
+
+#admin-sidebar .nav-link:hover {
+    background-color: #f8f9fa;
+}
+
+#admin-sidebar .nav-link.active {
+    color: #0d6efd;
+    border-left-color: #0d6efd;
+    background-color: rgba(13, 110, 253, 0.05);
+}
+
+#admin-sidebar .nav-link i {
+    margin-right: 0.5rem;
+    width: 20px;
+    text-align: center;
+}
+
+/* ---------- RESPONSIVE ADJUSTMENTS ---------- */
+@media (max-width: 767.98px) {
+    .hero-section {
+        padding: 3rem 1rem;
+    }
+
+    #admin-sidebar {
+        position: fixed;
+        top: 56px;
+        left: 0;
+        z-index: 1000;
+        width: 100%;
+        height: auto;
+        padding: 0;
+        border-right: none;
+        border-bottom: 1px solid #dee2e6;
+    }
+
+    .navbar-brand {
+        font-size: 1rem;
+    }
+
+    h1 {
+        font-size: 1.75rem;
+    }
+
+    h2 {
+        font-size: 1.5rem;
+    }
+}
+
+/* ---------- ANIMATIONS ---------- */
+.fade-in {
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+/* ---------- PRINT STYLES ---------- */
+@media print {
+    .no-print {
+        display: none !important;
+    }
+
+    body {
+        font-size: 12pt;
+    }
+
+    .card {
+        border: none !important;
+        box-shadow: none !important;
+    }
+}

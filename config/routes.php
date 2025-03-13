@@ -411,7 +411,36 @@ $router->get('search', function() {
     $controller = new SearchController();
     $controller->index();
 });
+// Admin users management routes
+$router->get('admin/users', function() {
+    $controller = new UserController();
+    $controller->index();
+});
 
+$router->get('admin/users/create', function() {
+    $controller = new UserController();
+    $controller->create();
+});
+
+$router->post('admin/users/create', function() {
+    $controller = new UserController();
+    $controller->store();
+});
+
+$router->get('admin/users/edit/:id', function($id) {
+    $controller = new UserController();
+    $controller->edit($id);
+});
+
+$router->post('admin/users/edit/:id', function($id) {
+    $controller = new UserController();
+    $controller->update($id);
+});
+
+$router->post('admin/users/delete/:id', function($id) {
+    $controller = new UserController();
+    $controller->delete($id);
+});
 
 
 // Return the configured router

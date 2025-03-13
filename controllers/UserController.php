@@ -2,12 +2,25 @@
 require_once './core/Controller.php';
 require_once './models/users/Utilisateur.php';
 require_once './models/users/Chercheur.php';
+require_once './models/users/MembreBureauExecutif.php';
+require_once './models/users/Admin.php';
 require_once './utils/FileManager.php';
+require_once './utils/PermissionsHelper.php';
 
 /**
  * User Controller
  */
 class UserController extends Controller {
+    protected $db;
+
+    /**
+     * Constructor
+     */
+    public function __construct() {
+        parent::__construct();
+        $this->db = Db::getInstance();
+    }
+
     /**
      * User profile page
      */
@@ -255,9 +268,6 @@ class UserController extends Controller {
     /**
      * List all users (admin only)
      */
-    /**
-     * List all users (admin only)
-     */
     public function index() {
         // Ensure user is an admin
         if (!$this->requireAuth('admin')) {
@@ -269,10 +279,7 @@ class UserController extends Controller {
         $status = $this->getInput('status');
         $search = $this->getInput('search');
 
-        // Get all users with roles
-        $utilisateurModel = new Utilisateur();
-
-        // Get base users query
+        // Get users query
         $query = "
         SELECT u.*, 
             CASE 
@@ -286,7 +293,7 @@ class UserController extends Controller {
         LEFT JOIN Chercheur c ON u.id = c.utilisateurId
         LEFT JOIN MembreBureauExecutif m ON u.id = m.utilisateurId
         WHERE 1=1
-    ";
+        ";
 
         $params = [];
         $conditions = [];
@@ -371,7 +378,6 @@ class UserController extends Controller {
             $user['roles'] = $userRoles;
         }
 
-        // Render the view with users and current filters
         $this->render('admin/users', [
             'pageTitle' => 'Gestion des utilisateurs',
             'users' => $users,
@@ -382,6 +388,168 @@ class UserController extends Controller {
             ]
         ]);
     }
+
+    /**
+     * Edit user form (admin only)
+     * @param int $id User ID
+     */
+    public function edit($id) {
+        // Ensure user is an admin
+        if (!$this->requireAuth('admin')) {
+            return;
+        }
+
+        // Get user
+        $utilisateurModel = new Utilisateur();
+        $user = $utilisateurModel->find($id);
+
+        if (!$user) {
+            $this->renderNotFound();
+            return;
+        }
+
+        // Get user details based on role
+        $userDetails = [];
+        $userRoles = [];
+
+        // Check if user is a researcher
+        $chercheurModel = new Chercheur();
+        $chercheurDetails = $chercheurModel->findWithDetails($id);
+
+        if ($chercheurDetails) {
+            $userDetails['chercheur'] = $chercheurDetails;
+            $userRoles[] = 'chercheur';
+        }
+
+        // Check if user is a board member
+        $membreModel = new MembreBureauExecutif();
+        $membreDetails = $membreModel->findWithDetails($id);
+
+        if ($membreDetails) {
+            $userDetails['membreBureauExecutif'] = $membreDetails;
+            $userRoles[] = 'membreBureauExecutif';
+        }
+
+        // Check if user is an admin
+        $adminModel = new Admin();
+        $adminDetails = $adminModel->findWithDetails($id);
+
+        if ($adminDetails) {
+            $userDetails['admin'] = $adminDetails;
+            $userRoles[] = 'admin';
+        }
+
+        $this->render('user/edit', [
+            'pageTitle' => 'Modifier l\'utilisateur',
+            'user' => $user,
+            'userDetails' => $userDetails,
+            'userRoles' => $userRoles
+        ]);
+    }
+
+    /**
+     * Process user edit form (admin only)
+     * @param int $id User ID
+     */
+    public function update($id) {
+        // Ensure user is an admin
+        if (!$this->requireAuth('admin')) {
+            return;
+        }
+
+        // Check if form was submitted
+        if (!$this->isPost()) {
+            $this->redirect('admin/users/edit/' . $id);
+            return;
+        }
+
+        // Get user
+        $utilisateurModel = new Utilisateur();
+        $user = $utilisateurModel->find($id);
+
+        if (!$user) {
+            $this->renderNotFound();
+            return;
+        }
+
+        // Get form data
+        $nom = $this->getInput('nom');
+        $prenom = $this->getInput('prenom');
+        $email = $this->getInput('email');
+        $status = $this->getInput('status') === 'on' ? 1 : 0;
+        $roles = $this->getInput('roles', []);
+
+        // Prepare data to update
+        $userData = [
+            'nom' => $nom,
+            'prenom' => $prenom,
+            'status' => $status
+        ];
+
+        // Validate basic info
+        $validation = $this->validate(
+            ['nom' => $nom, 'prenom' => $prenom],
+            ['nom' => 'required|max:255', 'prenom' => 'required|max:255']
+        );
+
+        if ($validation !== true) {
+            $this->setFlash('error', 'Veuillez corriger les erreurs dans le formulaire.');
+            $this->redirect('admin/users/edit/' . $id);
+            return;
+        }
+
+        // Check if email is being changed
+        if ($email !== $user['email']) {
+            // Validate email
+            $emailValidation = $this->validate(
+                ['email' => $email],
+                ['email' => 'required|email|unique:Utilisateur,email']
+            );
+
+            if ($emailValidation !== true) {
+                $this->setFlash('error', 'L\'adresse email est invalide ou déjà utilisée.');
+                $this->redirect('admin/users/edit/' . $id);
+                return;
+            }
+
+            $userData['email'] = $email;
+        }
+
+        // Check if password is being changed
+        $password = $this->getInput('password');
+        if (!empty($password)) {
+            // Validate password
+            $passwordValidation = $this->validate(
+                ['password' => $password],
+                ['password' => 'required|min:6']
+            );
+
+            if ($passwordValidation !== true) {
+                $this->setFlash('error', 'Le mot de passe doit contenir au moins 6 caractères.');
+                $this->redirect('admin/users/edit/' . $id);
+                return;
+            }
+
+            // Hash new password
+            $userData['motDePasse'] = password_hash($password, PASSWORD_DEFAULT);
+        }
+
+        // Update user data
+        $updated = $utilisateurModel->update($id, $userData);
+
+        if (!$updated) {
+            $this->setFlash('error', 'Une erreur est survenue lors de la mise à jour de l\'utilisateur.');
+            $this->redirect('admin/users/edit/' . $id);
+            return;
+        }
+
+        // Handle roles
+        $this->handleUserRoles($id, $roles);
+
+        $this->setFlash('success', 'L\'utilisateur a été mis à jour avec succès.');
+        $this->redirect('admin/users');
+    }
+
     /**
      * Create new user (admin only)
      */
@@ -407,7 +575,7 @@ class UserController extends Controller {
 
         // Check if form was submitted
         if (!$this->isPost()) {
-            $this->redirect('admin/users');
+            $this->redirect('admin/users/create');
             return;
         }
 
@@ -487,12 +655,12 @@ class UserController extends Controller {
             case 'membreBureauExecutif':
                 $membreRole = $this->getInput('membre_role');
                 $mandat = $this->getInput('mandat');
-                $permissions = $this->getInput('permissions');
+                $permissions = implode(',', $this->getInput('permissions', []));
                 $isChercheur = $this->getInput('is_chercheur') === 'on';
 
                 if ($isChercheur) {
-                    $domaineRecherche = $this->getInput('domaine_recherche');
-                    $bio = $this->getInput('bio');
+                    $domaineRecherche = $this->getInput('chercheur_domaine');
+                    $bio = $this->getInput('chercheur_bio');
 
                     $chercheurModel = new Chercheur();
                     $chercheurId = $chercheurModel->createFromUser($userId, $domaineRecherche, $bio);
@@ -506,167 +674,6 @@ class UserController extends Controller {
         }
 
         $this->setFlash('success', 'L\'utilisateur a été créé avec succès.');
-        $this->redirect('admin/users');
-    }
-
-    /**
-     * Edit user (admin only)
-     * @param int $id User ID
-     */
-    public function edit($id) {
-        // Ensure user is an admin
-        if (!$this->requireAuth('admin')) {
-            return;
-        }
-
-        // Get user
-        $utilisateurModel = new Utilisateur();
-        $user = $utilisateurModel->find($id);
-
-        if (!$user) {
-            $this->renderNotFound();
-            return;
-        }
-
-        // Get user details based on role
-        $userDetails = [];
-        $userRoles = [];
-
-        // Check if user is a researcher
-        $chercheurModel = new Chercheur();
-        $chercheurDetails = $chercheurModel->findWithDetails($id);
-
-        if ($chercheurDetails) {
-            $userDetails['chercheur'] = $chercheurDetails;
-            $userRoles[] = 'chercheur';
-        }
-
-        // Check if user is a board member
-        $membreModel = new MembreBureauExecutif();
-        $membreDetails = $membreModel->findWithDetails($id);
-
-        if ($membreDetails) {
-            $userDetails['membreBureauExecutif'] = $membreDetails;
-            $userRoles[] = 'membreBureauExecutif';
-        }
-
-        // Check if user is an admin
-        $adminModel = new Admin();
-        $adminDetails = $adminModel->findWithDetails($id);
-
-        if ($adminDetails) {
-            $userDetails['admin'] = $adminDetails;
-            $userRoles[] = 'admin';
-        }
-
-        $this->render('user/edit', [
-            'pageTitle' => 'Modifier l\'utilisateur',
-            'user' => $user,
-            'userDetails' => $userDetails,
-            'userRoles' => $userRoles
-        ]);
-    }
-
-    /**
-     * Process user edit form (admin only)
-     * @param int $id User ID
-     */
-    public function update($id) {
-        // Ensure user is an admin
-        if (!$this->requireAuth('admin')) {
-            return;
-        }
-
-        // Check if form was submitted
-        if (!$this->isPost()) {
-            $this->redirect('admin/users');
-            return;
-        }
-
-        // Get user
-        $utilisateurModel = new Utilisateur();
-        $user = $utilisateurModel->find($id);
-
-        if (!$user) {
-            $this->renderNotFound();
-            return;
-        }
-
-        // Get form data
-        $nom = $this->getInput('nom');
-        $prenom = $this->getInput('prenom');
-        $email = $this->getInput('email');
-        $status = $this->getInput('status') === 'on';
-        $roles = $this->getInput('roles', []);
-
-        // Prepare data to update
-        $userData = [
-            'nom' => $nom,
-            'prenom' => $prenom,
-            'status' => $status
-        ];
-
-        // Validate basic info
-        $validation = $this->validate(
-            ['nom' => $nom, 'prenom' => $prenom],
-            ['nom' => 'required|max:255', 'prenom' => 'required|max:255']
-        );
-
-        if ($validation !== true) {
-            $this->setFlash('error', 'Veuillez corriger les erreurs dans le formulaire.');
-            $this->redirect('admin/users/edit/' . $id);
-            return;
-        }
-
-        // Check if email is being changed
-        if ($email !== $user['email']) {
-            // Validate email
-            $emailValidation = $this->validate(
-                ['email' => $email],
-                ['email' => 'required|email|unique:Utilisateur,email']
-            );
-
-            if ($emailValidation !== true) {
-                $this->setFlash('error', 'L\'adresse email est invalide ou déjà utilisée.');
-                $this->redirect('admin/users/edit/' . $id);
-                return;
-            }
-
-            $userData['email'] = $email;
-        }
-
-        // Check if password is being changed
-        $password = $this->getInput('password');
-        if (!empty($password)) {
-            // Validate password
-            $passwordValidation = $this->validate(
-                ['password' => $password],
-                ['password' => 'required|min:6']
-            );
-
-            if ($passwordValidation !== true) {
-                $this->setFlash('error', 'Le mot de passe doit contenir au moins 6 caractères.');
-                $this->redirect('admin/users/edit/' . $id);
-                return;
-            }
-
-            // Hash new password
-            $userData['motDePasse'] = password_hash($password, PASSWORD_DEFAULT);
-        }
-
-        // Update user data
-        $updated = $utilisateurModel->update($id, $userData);
-
-        if (!$updated) {
-            $this->setFlash('error', 'Une erreur est survenue lors de la mise à jour de l\'utilisateur.');
-            $this->redirect('admin/users/edit/' . $id);
-            return;
-        }
-
-        // Handle roles
-        $this->handleUserRoles($id, $roles);
-
-        $this->setFlash('success', 'L\'utilisateur a été mis à jour avec succès.');
         $this->redirect('admin/users');
     }
 
@@ -747,7 +754,7 @@ class UserController extends Controller {
         if (in_array('membreBureauExecutif', $roles)) {
             $membreRole = $this->getInput('membre_role');
             $mandat = $this->getInput('mandat');
-            $permissions = $this->getInput('permissions');
+            $permissions = implode(',', $this->getInput('permissions', []));
             $isChercheur = in_array('chercheur', $roles);
 
             $chercheurId = null;

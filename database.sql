@@ -1,3 +1,6 @@
+create database ests ;
+use ests;
+
 CREATE TABLE Utilisateur (
                              id INT PRIMARY KEY AUTO_INCREMENT,  -- Automatic ID generation
                              nom VARCHAR(255) NOT NULL,

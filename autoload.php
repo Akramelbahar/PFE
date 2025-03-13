@@ -29,7 +29,8 @@ function autoload($class) {
         'NewsController' => './controllers/NewsController.php',
         'ContactController' => './controllers/ContactController.php',
         'IdeeRechercheController' => './controllers/IdeeRechercheController.php',
-
+        'SearchController'=>'./controllers/SearchController.php',
+        'ActivityDashboardController'=>'./controllers/ActivityDashboardController.php',
         // Models
         'Model' => './models/Model.php',
         'Utilisateur' => './models/users/Utilisateur.php',
