@@ -1,4 +1,47 @@
-To update your named (BIND) configuration to work with the modified DHCP configuration where all clients will have the hostname "client.est.intra", I'll provide you with the necessary changes.
+I see the error now. You have permission issues with your named configuration:
+
+```
+named[3009]: isc_stdio_open '/var/log/named.ddns.log' failed: permission denied
+named[3009]: configuring logging: permission denied
+named[3009]: loading configuration: permission denied
+named[3009]: exiting (due to fatal error)
+```
+
+This indicates that the named process doesn't have permission to access the log file and possibly other configuration files. Let's fix these permission issues:
+
+1. First, create the log directory and file with proper permissions:
+```bash
+sudo mkdir -p /var/log
+sudo touch /var/log/named.ddns.log
+sudo chown named:named /var/log/named.ddns.log
+sudo chmod 664 /var/log/named.ddns.log
+```
+
+2. Make sure the named user has access to all relevant files:
+```bash
+sudo chown -R named:named /var/named
+sudo chown named:named /etc/named.conf
+```
+
+3. Check SELinux contexts (if SELinux is enabled):
+```bash
+# Set the correct SELinux context for the log file
+sudo semanage fcontext -a -t named_log_t "/var/log/named.ddns.log"
+sudo restorecon -v /var/log/named.ddns.log
+
+# Allow named to write logs
+sudo setsebool -P named_write_master_zones 1
+```
+
+4. Simplify your named.conf temporarily by removing the logging section to see if that's causing issues. You can add it back later once the service is working.
+
+After making these changes, try to restart the named service:
+
+```bash
+sudo systemctl restart named
+```
+
+These permission fixes should resolve the issues with starting the named service. Once it's running correctly, you can test the DNS and DHCP integration.To update your named (BIND) configuration to work with the modified DHCP configuration where all clients will have the hostname "client.est.intra", I'll provide you with the necessary changes.
 
 Here's an updated named.conf file that will work properly with your new DHCP configuration:
 
