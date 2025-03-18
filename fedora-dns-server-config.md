@@ -13,3 +13,9 @@ Main config: /etc/dhcp/dhcpd.conf
 Interface settings: /etc/sysconfig/dhcpd
 Leases database: /var/lib/dhcpd/dhcpd.leases
 Log files: /var/log/messages or through journalctl
+
+
+
+ option host-name "client";
+    ddns-hostname "client";
+    ddns-domain-name = "est.intra";
