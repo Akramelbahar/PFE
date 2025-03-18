@@ -13,7 +13,6 @@ options {
     recursion yes;
     dnssec-enabled no;
     dnssec-validation no;
-    managed-keys-directory "/var/named/dynamic";
     pid-file "/run/named/named.pid";
     session-keyfile "/run/named/session.key";
 };
