@@ -3,8 +3,6 @@ ddns-updates on;
 ddns-update-style interim;
 update-static-leases on;
 use-host-decl-names on;
-allow client-updates;
-ignore client-updates;
 
 # DDNS security key
 key "ddns-key.est.intra" {
@@ -26,10 +24,9 @@ zone 1.168.192.in-addr.arpa. {
 # Global options
 option domain-name "est.intra";
 option domain-name-servers 192.168.1.10;
-default-lease-time 3600;          # Increased for better stability
-max-lease-time 86400;             # Increased to 24 hours
+default-lease-time 3600;
+max-lease-time 86400;
 authoritative;
-log-facility local7;              # Better logging
 
 # Subnet configuration
 subnet 192.168.1.0 netmask 255.255.255.0 {
@@ -37,11 +34,16 @@ subnet 192.168.1.0 netmask 255.255.255.0 {
     option routers 192.168.1.1;
     option broadcast-address 192.168.1.255;
     
-    # DDNS configuration for clients
-    ddns-hostname = concat("client-", binary-to-ascii(10, 8, "-", leased-address));
+    # Generate hostname based on MAC address or let client send hostname
+    if exists host-name {
+        ddns-hostname = option host-name;
+    } else {
+        ddns-hostname = concat("client-", binary-to-ascii(16, 8, "-", substring(hardware, 1, 6)));
+    }
+    
     ddns-domain-name = "est.intra";
     
-    # Set the FQDN options
+    # FQDN options to control hostname registration
     option fqdn.no-client-update on;
     option fqdn.server-update on;
     option fqdn.encoded on;
