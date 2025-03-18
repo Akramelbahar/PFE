@@ -1,361 +1,279 @@
-# Complete Fedora DNS Server Configuration Guide
+I'll help you set up Dynamic DNS (DDNS) with DHCP integration on Fedora Server. DDNS allows clients to automatically update their DNS records when they receive IP addresses from DHCP.
 
-This guide provides comprehensive instructions for setting up a DNS server on Fedora with domain `intra.ests.com` and the IP address `192.168.1.10`.
+Let's modify our previous configuration to implement DDNS:
 
-## Initial System Setup
+## Server Configuration (DDNS + DHCP)
 
-### Install Fedora
-
-1. Create a new VM in VirtualBox:
-   - 2 GB RAM minimum
-   - 20 GB disk space
-   - Network adapter set to "Internal Network" (name it "intranet")
-
-2. Install Fedora from ISO
-   - During installation, set hostname to `dns.intra.ests.com`
-   - Create a user account as needed
-
-### Configure Static IP Address
-
-After installation and login:
+First, let's modify the BIND configuration to allow dynamic updates:
 
 ```bash
-# Create/edit network configuration file
-sudo nano /etc/NetworkManager/system-connections/enp0s3.nmconnection
+# On the server VM (dns.est.intra)
+# Generate a key for secure updates
+sudo dnssec-keygen -a HMAC-SHA256 -b 256 -n HOST ddns-key.est.intra
+
+# This creates two files in the current directory with names like:
+# Kddns-key.est.intra.+157+12345.key and Kddns-key.est.intra.+157+12345.private
+# Note the key value from the .key file for use below
 ```
 
-Add these contents (replace enp0s3 with your actual interface name if different):
-
-```
-[connection]
-id=enp0s3
-type=ethernet
-interface-name=enp0s3
-autoconnect=true
-
-[ethernet]
-mac-address=<Your MAC address>
-
-[ipv4]
-method=manual
-addresses=192.168.1.10/24
-gateway=192.168.1.1
-dns=127.0.0.1
-
-[ipv6]
-method=disabled
-```
-
-Save and apply the changes:
+Now, let's create a key configuration file:
 
 ```bash
-sudo chmod 600 /etc/NetworkManager/system-connections/enp0s3.nmconnection
-sudo nmcli connection reload
-sudo nmcli connection down enp0s3 && sudo nmcli connection up enp0s3
+sudo vi /etc/named/ddns.key
 ```
 
-Verify your IP address:
+Add the following content (replace the secret with the actual key from your generated file):
+
+```
+key "ddns-key.est.intra" {
+    algorithm hmac-sha256;
+    secret "paste_your_generated_secret_here";
+};
+```
+
+Now, modify the named.conf file:
 
 ```bash
-ip addr show
+sudo vi /etc/named.conf
 ```
 
-## DNS Server Installation and Configuration
-
-### Install BIND DNS Server
-
-```bash
-# Update the system
-sudo dnf update -y
-
-# Install BIND and utilities
-sudo dnf install bind bind-utils -y
-```
-
-### Configure BIND DNS Server
-
-1. Backup the original configuration:
-
-```bash
-sudo cp /etc/named.conf /etc/named.conf.backup
-```
-
-2. Edit the main configuration file:
-
-```bash
-sudo nano /etc/named.conf
-```
-
-Replace the contents with:
+Include the key file and modify the zone definitions:
 
 ```
-// named.conf
+include "/etc/named/ddns.key";
+
 options {
-        listen-on port 53 { 127.0.0.1; 192.168.1.10; };
-        listen-on-v6 port 53 { ::1; };
-        directory       "/var/named";
-        dump-file       "/var/named/data/cache_dump.db";
-        statistics-file "/var/named/data/named_stats.txt";
-        memstatistics-file "/var/named/data/named_mem_stats.txt";
-        secroots-file   "/var/named/data/named.secroots";
-        recursing-file  "/var/named/data/named.recursing";
-
-        // Allow queries from local network
-        allow-query     { localhost; 192.168.1.0/24; };
-        
-        // Enable recursion for clients
-        recursion yes;
-        
-        // Forward DNS queries to these public DNS servers
-        forwarders {
-                1.1.1.1;
-                8.8.8.8;
-        };
-        forward first;
-
-        dnssec-validation yes;
-        managed-keys-directory "/var/named/dynamic";
-        pid-file "/run/named/named.pid";
-        session-keyfile "/run/named/session.key";
+    listen-on port 53 { 127.0.0.1; 192.168.1.10; };
+    listen-on-v6 port 53 { ::1; };
+    directory     "/var/named";
+    dump-file     "/var/named/data/cache_dump.db";
+    statistics-file "/var/named/data/named_stats.txt";
+    memstatistics-file "/var/named/data/named_mem_stats.txt";
+    secroots-file "/var/named/data/named.secroots";
+    recursing-file "/var/named/data/named.recursing";
+    allow-query     { localhost; 192.168.1.0/24; };
+    forwarders      { 8.8.8.8; 8.8.4.4; };
+    forward         first;
+    recursion yes;
+    dnssec-validation yes;
+    managed-keys-directory "/var/named/dynamic";
+    pid-file "/run/named/named.pid";
+    session-keyfile "/run/named/session.key";
+    include "/etc/crypto-policies/back-ends/bind.config";
 };
 
-logging {
-        channel default_debug {
-                file "data/named.run";
-                severity dynamic;
-        };
+zone "est.intra" IN {
+    type master;
+    file "est.intra.zone";
+    allow-update { key "ddns-key.est.intra"; };
+    journal "est.intra.zone.jnl";
 };
 
-// Root hint zone
-zone "." IN {
-        type hint;
-        file "named.ca";
-};
-
-// Forward zone for intra.ests.com
-zone "intra.ests.com" IN {
-        type master;
-        file "intra.ests.com.zone";
-        allow-update { none; };
-};
-
-// Reverse zone for 192.168.1.0/24
 zone "1.168.192.in-addr.arpa" IN {
-        type master;
-        file "1.168.192.zone";
-        allow-update { none; };
+    type master;
+    file "est.intra.rev";
+    allow-update { key "ddns-key.est.intra"; };
+    journal "est.intra.rev.jnl";
 };
-
-// Include standard zones
-include "/etc/named.rfc1912.zones";
-include "/etc/named.root.key";
 ```
 
-### Create Zone Files
-
-1. Create the forward zone file:
+Now modify the zone files to prepare them for dynamic updates:
 
 ```bash
-sudo nano /var/named/intra.ests.com.zone
+sudo vi /var/named/est.intra.zone
 ```
 
-Add:
+Simplify it to the minimal needed content:
 
 ```
 $TTL 86400
-@       IN SOA  dns.intra.ests.com. admin.intra.ests.com. (
-                2023031201      ; Serial (YYYYMMDDNN format)
-                3600            ; Refresh (1 hour)
-                1800            ; Retry (30 minutes)
-                604800          ; Expire (1 week)
-                86400 )         ; Minimum TTL (1 day)
-
-; Name Servers
-@       IN NS   dns.intra.ests.com.
-
-; A Records
-@       IN A    192.168.1.10
+@       IN SOA  dns.est.intra. admin.est.intra. (
+                2023011001 ; Serial
+                3600       ; Refresh
+                1800       ; Retry
+                604800     ; Expire
+                86400      ; Minimum TTL
+)
+; Name servers
+@       IN NS   dns.est.intra.
+; A records
 dns     IN A    192.168.1.10
-client  IN A    192.168.1.100
-
-; CNAME Records
-www     IN CNAME        @
-mail    IN CNAME        @
 ```
 
-2. Create the reverse zone file:
+Simplify the reverse zone file as well:
 
 ```bash
-sudo nano /var/named/1.168.192.zone
+sudo vi /var/named/est.intra.rev
 ```
 
-Add:
+Content:
 
 ```
 $TTL 86400
-@       IN SOA  dns.intra.ests.com. admin.intra.ests.com. (
-                2023031201      ; Serial (YYYYMMDDNN format)
-                3600            ; Refresh (1 hour)
-                1800            ; Retry (30 minutes)
-                604800          ; Expire (1 week)
-                86400 )         ; Minimum TTL (1 day)
-
-; Name Servers
-@       IN NS   dns.intra.ests.com.
-
-; PTR Records
-10      IN PTR  dns.intra.ests.com.
-100     IN PTR  client.intra.ests.com.
+@       IN SOA  dns.est.intra. admin.est.intra. (
+                2023011001 ; Serial
+                3600       ; Refresh
+                1800       ; Retry
+                604800     ; Expire
+                86400      ; Minimum TTL
+)
+; Name servers
+@       IN NS   dns.est.intra.
+; PTR records
+10      IN PTR  dns.est.intra.
 ```
 
-3. Set correct permissions:
+Now let's modify the DHCP configuration to work with DDNS:
 
 ```bash
-sudo chown named:named /var/named/intra.ests.com.zone
-sudo chown named:named /var/named/1.168.192.zone
-sudo chmod 640 /var/named/intra.ests.com.zone
-sudo chmod 640 /var/named/1.168.192.zone
+sudo vi /etc/dhcp/dhcpd.conf
 ```
 
-## Start and Enable the DNS Service
+Update with the following content:
 
-1. Check configuration syntax:
+```
+# DDNS configuration
+ddns-updates on;
+ddns-update-style interim;
+update-static-leases on;
+use-host-decl-names on;
 
-```bash
-sudo named-checkconf /etc/named.conf
+# Include the DDNS key
+include "/etc/named/ddns.key";
+
+# DNS zone update configurations
+zone est.intra. {
+    key ddns-key.est.intra;
+    primary 192.168.1.10;
+}
+
+zone 1.168.192.in-addr.arpa. {
+    key ddns-key.est.intra;
+    primary 192.168.1.10;
+}
+
+option domain-name "est.intra";
+option domain-name-servers 192.168.1.10;
+default-lease-time 600;
+max-lease-time 7200;
+authoritative;
+
+subnet 192.168.1.0 netmask 255.255.255.0 {
+  range 192.168.1.50 192.168.1.150;
+  option routers 192.168.1.1;
+  option broadcast-address 192.168.1.255;
+  
+  # Fixed IP for client
+  host client {
+    hardware ethernet AA:BB:CC:DD:EE:FF;  # Replace with actual MAC address
+    fixed-address 192.168.1.100;
+    option host-name "client.est.intra";
+    ddns-hostname "client";
+    ddns-domain-name "est.intra";
+  }
+}
 ```
 
-2. Check zone file syntax:
+Set proper file permissions:
 
 ```bash
-sudo named-checkzone intra.ests.com /var/named/intra.ests.com.zone
-sudo named-checkzone 1.168.192.in-addr.arpa /var/named/1.168.192.zone
+# Secure the key file
+sudo chmod 640 /etc/named/ddns.key
+sudo chown root:named /etc/named/ddns.key
+
+# Make sure named can write to the zone files
+sudo chown named:named /var/named/est.intra.zone
+sudo chown named:named /var/named/est.intra.rev
+sudo chmod 644 /var/named/est.intra.zone
+sudo chmod 644 /var/named/est.intra.rev
+
+# Make the key accessible to DHCP server
+sudo chgrp dhcpd /etc/named/ddns.key
+sudo chmod 640 /etc/named/ddns.key
 ```
 
-3. Start and enable the BIND service:
+Now restart both services:
 
 ```bash
-sudo systemctl start named
-sudo systemctl enable named
+sudo systemctl restart named
+sudo systemctl restart dhcpd
+
+# Verify the services are running
 sudo systemctl status named
+sudo systemctl status dhcpd
 ```
 
-## Configure Firewall
+## Client Configuration
 
-Allow DNS traffic through the firewall:
+For DDNS to work properly, you'll want to configure the client to use DHCP. On the client machine:
 
 ```bash
-sudo firewall-cmd --permanent --add-service=dns
-sudo firewall-cmd --reload
-sudo firewall-cmd --list-all
+# On the client VM
+# Configure to use DHCP
+sudo nmcli con mod "System eth0" ipv4.method auto
+sudo nmcli con up "System eth0"
+
+# You can explicitly set the hostname if you want
+sudo hostnamectl set-hostname client.est.intra
 ```
 
-## Test DNS Server Configuration
+## Testing DDNS
 
-1. Test forward resolution from the DNS server:
+To test that dynamic DNS updates are working:
 
-```bash
-# Using dig
-dig dns.intra.ests.com @localhost
-dig client.intra.ests.com @localhost
+1. On the client, request a new IP address:
+   ```bash
+   sudo dhclient -v -r eth0
+   sudo dhclient -v eth0
+   ```
 
-# Using nslookup
-nslookup dns.intra.ests.com
-nslookup client.intra.ests.com
-```
+2. Check the client's network configuration:
+   ```bash
+   ip addr show eth0
+   cat /etc/resolv.conf
+   ```
 
-2. Test reverse resolution:
+3. On the server, check if the DNS records have been updated:
+   ```bash
+   sudo rndc dumpdb -zones
+   sudo cat /var/named/data/named_dump.db
+   
+   # Or query the DNS server directly
+   dig @192.168.1.10 client.est.intra
+   dig @192.168.1.10 -x 192.168.1.100
+   ```
 
-```bash
-dig -x 192.168.1.10 @localhost
-dig -x 192.168.1.100 @localhost
-
-nslookup 192.168.1.10
-nslookup 192.168.1.100
-```
-
-3. Test external DNS resolution:
-
-```bash
-dig google.com @localhost
-```
+4. From the client, test name resolution:
+   ```bash
+   nslookup client.est.intra
+   nslookup dns.est.intra
+   ping -c 4 dns.est.intra
+   ```
 
 ## Troubleshooting
 
 If you encounter issues:
 
-1. Check BIND service status:
-```bash
-sudo systemctl status named
-```
+1. Check the logs:
+   ```bash
+   sudo journalctl -u named
+   sudo journalctl -u dhcpd
+   ```
 
-2. Check logs for errors:
-```bash
-sudo journalctl -u named
-```
+2. Test manual DDNS updates to verify your configuration:
+   ```bash
+   # On the server, using nsupdate tool
+   nsupdate -k /path/to/Kddns-key.est.intra.+157+12345.private
+   > server 192.168.1.10
+   > zone est.intra
+   > update add test.est.intra 86400 A 192.168.1.200
+   > send
+   > quit
+   ```
 
-3. Verify zone file permissions:
-```bash
-ls -la /var/named/
-```
+3. Verify the update with:
+   ```bash
+   dig @192.168.1.10 test.est.intra
+   ```
 
-4. Confirm SELinux is not blocking the service:
-```bash
-sudo ausearch -m avc -ts recent
-```
-
-5. If SELinux is causing issues, you can set the correct context:
-```bash
-sudo restorecon -rv /var/named
-```
-
-## Additional Configuration (Optional)
-
-### Configure DNS Forwarding for Internet Access
-
-If needed, ensure forwarding is properly configured in `/etc/named.conf`:
-
-```
-options {
-    ...
-    forwarders {
-        1.1.1.1;  // Cloudflare
-        8.8.8.8;  // Google
-    };
-    forward first;
-    ...
-};
-```
-
-### Add DHCP Support
-
-If you want the DNS server to also provide DHCP:
-
-```bash
-sudo dnf install dhcp-server -y
-sudo nano /etc/dhcp/dhcpd.conf
-```
-
-Add:
-
-```
-option domain-name "intra.ests.com";
-option domain-name-servers 192.168.1.10;
-
-default-lease-time 600;
-max-lease-time 7200;
-
-subnet 192.168.1.0 netmask 255.255.255.0 {
-  range 192.168.1.50 192.168.1.200;
-  option routers 192.168.1.1;
-}
-```
-
-Start and enable DHCP:
-
-```bash
-sudo systemctl start dhcpd
-sudo systemctl enable dhcpd
-sudo firewall-cmd --add-service=dhcp --permanent
-sudo firewall-cmd --reload
-```
+This DDNS setup allows clients to automatically register themselves in DNS when they receive IP addresses from DHCP, making it easier to manage your network and keep DNS records up to date.
