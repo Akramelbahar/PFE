@@ -229,3 +229,10 @@ These configurations include several key improvements:
 - Disabled SELinux temporarily to eliminate permission issues
 
 If you're still having problems after implementing these changes, you might need to restart the entire system and check the hardware configuration of your network.
+zone "est.intra" {
+    type master;
+    file "est.intra.zone";
+    allow-update { key ddns-key; };
+    journal "est.intra.zone.jnl";
+    update-policy local;  # Add this line
+};
