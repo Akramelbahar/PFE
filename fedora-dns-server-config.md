@@ -1,17 +1,8 @@
-I'll provide you with the full DHCP and DNS configurations, using nano instead of vi, and ensure the NS records are correctly assigned to devices connecting via DHCP.
+To have domains automatically assigned by DNS and DHCP when clients connect, we need to ensure the DDNS (Dynamic DNS) updates are working correctly. Let me provide you with a complete configuration that will automatically assign domain names to clients.
 
-## Step 1: Configure BIND (DNS Server)
-
-Let's start with the DNS configuration:
+### 1. DNS Server Configuration (named.conf)
 
 ```bash
-# Edit named.conf with nano
-sudo nano /etc/named.conf
-```
-
-Add this content:
-
-```
 options {
     listen-on port 53 { 127.0.0.1; 192.168.1.10; };
     listen-on-v6 port 53 { ::1; };
@@ -25,46 +16,36 @@ options {
     forwarders      { 8.8.8.8; 8.8.4.4; };
     forward         first;
     recursion yes;
-    dnssec-validation yes;
-    managed-keys-directory "/var/named/dynamic";
+    dnssec-validation no;
+    dnssec-enable no;
     pid-file "/run/named/named.pid";
     session-keyfile "/run/named/session.key";
-    include "/etc/crypto-policies/back-ends/bind.config";
 };
 
-// Create a key for secure dynamic updates
 key "ddns-key.est.intra" {
     algorithm hmac-md5;
-    secret "YourGeneratedSecretKeyHere"; // Replace with your generated key
+    secret "abcdefghijklmnopqrstuvwxyz123456";
 };
 
 zone "est.intra" IN {
     type master;
     file "est.intra.zone";
     allow-update { key "ddns-key.est.intra"; };
-    journal "est.intra.zone.jnl";
 };
 
 zone "1.168.192.in-addr.arpa" IN {
     type master;
     file "est.intra.rev";
     allow-update { key "ddns-key.est.intra"; };
-    journal "est.intra.rev.jnl";
 };
 ```
 
-Now, let's create the forward zone file:
-
-```bash
-sudo nano /var/named/est.intra.zone
-```
-
-Add this content:
+### 2. Forward Zone File (est.intra.zone)
 
 ```
 $TTL 86400
 @       IN SOA  dns.est.intra. admin.est.intra. (
-                2023011002 ; Serial
+                2023011001 ; Serial
                 3600       ; Refresh
                 1800       ; Retry
                 604800     ; Expire
@@ -76,18 +57,12 @@ $TTL 86400
 dns     IN A    192.168.1.10
 ```
 
-Create the reverse zone file:
-
-```bash
-sudo nano /var/named/est.intra.rev
-```
-
-Add this content:
+### 3. Reverse Zone File (est.intra.rev)
 
 ```
 $TTL 86400
 @       IN SOA  dns.est.intra. admin.est.intra. (
-                2023011002 ; Serial
+                2023011001 ; Serial
                 3600       ; Refresh
                 1800       ; Retry
                 604800     ; Expire
@@ -99,38 +74,7 @@ $TTL 86400
 10      IN PTR  dns.est.intra.
 ```
 
-Set proper permissions:
-
-```bash
-sudo chown named:named /var/named/est.intra.zone
-sudo chown named:named /var/named/est.intra.rev
-sudo chmod 644 /var/named/est.intra.zone
-sudo chmod 644 /var/named/est.intra.rev
-```
-
-## Step 2: Generate DDNS Key
-
-If you haven't successfully generated a key yet, let's create one manually:
-
-```bash
-# Generate a random string to use as your key
-openssl rand -base64 16 > /tmp/ddns-key.txt
-
-# View the generated key
-cat /tmp/ddns-key.txt
-```
-
-Take note of the generated key, and replace "YourGeneratedSecretKeyHere" in the named.conf file with this key.
-
-## Step 3: Configure DHCP with DDNS Integration
-
-Now, let's set up the DHCP configuration:
-
-```bash
-sudo nano /etc/dhcp/dhcpd.conf
-```
-
-Add this content:
+### 4. DHCP Server Configuration (dhcpd.conf)
 
 ```
 # DDNS configuration
@@ -142,7 +86,7 @@ use-host-decl-names on;
 # Define the DDNS key (must match the one in named.conf)
 key "ddns-key.est.intra" {
     algorithm hmac-md5;
-    secret "YourGeneratedSecretKeyHere"; # Replace with the same key used in named.conf
+    secret "abcdefghijklmnopqrstuvwxyz123456";
 };
 
 # DNS update configuration
@@ -159,9 +103,10 @@ zone 1.168.192.in-addr.arpa. {
 # Basic network settings
 option domain-name "est.intra";
 option domain-name-servers 192.168.1.10;
-default-lease-time 600;
-max-lease-time 7200;
+default-lease-time 3600;
+max-lease-time 86400;
 authoritative;
+log-facility local7;
 
 # Define the subnet
 subnet 192.168.1.0 netmask 255.255.255.0 {
@@ -169,97 +114,61 @@ subnet 192.168.1.0 netmask 255.255.255.0 {
     option routers 192.168.1.1;
     option broadcast-address 192.168.1.255;
     
-    # Set client hostname/domain to be updated in DNS
-    ddns-hostname = concat("client-", binary-to-ascii(10, 8, "-", leased-address));
+    # This will automatically generate a hostname based on the client's IP
+    # For example, 192.168.1.108 would get hostname "client-108"
+    ddns-hostname = concat("client-", binary-to-ascii(10, 8, "-", substring(leased-address, 3, 1)));
     ddns-domain-name = "est.intra";
     
-    # Static IP assignment for specific client (optional)
-    host client {
-        hardware ethernet AA:BB:CC:DD:EE:FF;  # Replace with actual MAC address
-        fixed-address 192.168.1.100;
-        option host-name "client.est.intra";
-        ddns-hostname "client";
-        ddns-domain-name "est.intra";
-    }
+    # FQDN options
+    option fqdn.no-client-update on;
+    option fqdn.server-update on;
+    option fqdn.encoded on;
 }
 ```
 
-Make sure to replace "YourGeneratedSecretKeyHere" with the same key you used in the named.conf file.
-
-## Step 4: Specify DHCP Interface
-
-You might need to specify which network interface DHCP should listen on:
+### 5. Set Permissions and Restart Services
 
 ```bash
-sudo nano /etc/sysconfig/dhcpd
-```
-
-Add this line (replace eth0 with your actual network interface name):
-
-```
-DHCPDARGS=eth0
-```
-
-## Step 5: Set SELinux Context (if SELinux is enabled)
-
-```bash
+sudo chmod 644 /var/named/est.intra.zone
+sudo chmod 644 /var/named/est.intra.rev
+sudo chown named:named /var/named/est.intra.zone
+sudo chown named:named /var/named/est.intra.rev
 sudo restorecon -r /var/named
 sudo restorecon -r /etc/named.conf
 sudo restorecon -r /etc/dhcp
+
+sudo systemctl restart named
+sudo systemctl restart dhcpd
 ```
 
-## Step 6: Start and Enable Services
+### 6. Client Configuration
+
+On the client, request a new IP address:
 
 ```bash
-# Enable and start DNS
-sudo systemctl enable named
-sudo systemctl start named
-
-# Enable and start DHCP
-sudo systemctl enable dhcpd
-sudo systemctl start dhcpd
-
-# Check if the services are running
-sudo systemctl status named
-sudo systemctl status dhcpd
+sudo dhclient -r
+sudo dhclient
 ```
 
-## Step 7: Open Firewall Ports
+With this configuration:
+
+1. The DHCP server will assign IP addresses to clients
+2. It will automatically generate hostnames based on IP (e.g., client-108 for 192.168.1.108)
+3. The DHCP server will automatically update the DNS server with both forward and reverse records
+4. Clients will be able to resolve names within the est.intra domain
+
+To verify the setup is working, the client should be able to:
 
 ```bash
-sudo firewall-cmd --permanent --add-service=dns
-sudo firewall-cmd --permanent --add-service=dhcp
-sudo firewall-cmd --reload
+hostname   # Should show the hostname assigned by DHCP
+dig client-108.est.intra  # Should resolve to the IP
+nslookup 192.168.1.108  # Should return the hostname
 ```
 
-## Verification
+If you want a more expressive hostname that includes more parts of the IP address, you can modify the `ddns-hostname` line to:
 
-Once the client connects to the DHCP server, it should receive:
-1. An IP address (e.g., 192.168.1.100)
-2. A hostname based on the IP (e.g., client-192-168-1-100.est.intra)
-3. The DNS server will be automatically updated with this hostname and IP
-
-You can verify this on the client with:
-
-```bash
-# On client
-hostname
-ip addr
-cat /etc/resolv.conf
+```
+ddns-hostname = concat("client-", binary-to-ascii(10, 8, "-", leased-address));
 ```
 
-And on the server with:
-
-```bash
-# On server
-dig @192.168.1.10 client-192-168-1-100.est.intra
-```
-
-If you encounter any specific errors, check the logs:
-
-```bash
-sudo journalctl -u named
-sudo journalctl -u dhcpd
-```
-
-This configuration will ensure that any device connecting to your DHCP server will automatically get registered in DNS with a hostname derived from its IP address.
+This will create names like "client-192-168-1-108" instead of just "client-108".
