@@ -36,6 +36,7 @@ option domain-name-servers 192.168.1.10;
 And in your zone file, make sure you have:
 ```
 dns     IN A    192.168.1.10
+10      IN PTR  dns.est.intra.
 ```
 
 If you need to access your DNS server, use `dns.est.intra` or simply the IP address 192.168.1.10 directly.
