@@ -1,47 +1,17 @@
-I'll help you set up Dynamic DNS (DDNS) with DHCP integration on Fedora Server. DDNS allows clients to automatically update their DNS records when they receive IP addresses from DHCP.
+I'll provide you with the full DHCP and DNS configurations, using nano instead of vi, and ensure the NS records are correctly assigned to devices connecting via DHCP.
 
-Let's modify our previous configuration to implement DDNS:
+## Step 1: Configure BIND (DNS Server)
 
-## Server Configuration (DDNS + DHCP)
-
-First, let's modify the BIND configuration to allow dynamic updates:
+Let's start with the DNS configuration:
 
 ```bash
-# On the server VM (dns.est.intra)
-# Generate a key for secure updates
-sudo dnssec-keygen -a HMAC-SHA256 -b 256 -n HOST ddns-key.est.intra
-
-# This creates two files in the current directory with names like:
-# Kddns-key.est.intra.+157+12345.key and Kddns-key.est.intra.+157+12345.private
-# Note the key value from the .key file for use below
+# Edit named.conf with nano
+sudo nano /etc/named.conf
 ```
 
-Now, let's create a key configuration file:
-
-```bash
-sudo vi /etc/named/ddns.key
-```
-
-Add the following content (replace the secret with the actual key from your generated file):
+Add this content:
 
 ```
-key "ddns-key.est.intra" {
-    algorithm hmac-sha256;
-    secret "paste_your_generated_secret_here";
-};
-```
-
-Now, modify the named.conf file:
-
-```bash
-sudo vi /etc/named.conf
-```
-
-Include the key file and modify the zone definitions:
-
-```
-include "/etc/named/ddns.key";
-
 options {
     listen-on port 53 { 127.0.0.1; 192.168.1.10; };
     listen-on-v6 port 53 { ::1; };
@@ -62,6 +32,12 @@ options {
     include "/etc/crypto-policies/back-ends/bind.config";
 };
 
+// Create a key for secure dynamic updates
+key "ddns-key.est.intra" {
+    algorithm hmac-md5;
+    secret "YourGeneratedSecretKeyHere"; // Replace with your generated key
+};
+
 zone "est.intra" IN {
     type master;
     file "est.intra.zone";
@@ -77,18 +53,18 @@ zone "1.168.192.in-addr.arpa" IN {
 };
 ```
 
-Now modify the zone files to prepare them for dynamic updates:
+Now, let's create the forward zone file:
 
 ```bash
-sudo vi /var/named/est.intra.zone
+sudo nano /var/named/est.intra.zone
 ```
 
-Simplify it to the minimal needed content:
+Add this content:
 
 ```
 $TTL 86400
 @       IN SOA  dns.est.intra. admin.est.intra. (
-                2023011001 ; Serial
+                2023011002 ; Serial
                 3600       ; Refresh
                 1800       ; Retry
                 604800     ; Expire
@@ -100,18 +76,18 @@ $TTL 86400
 dns     IN A    192.168.1.10
 ```
 
-Simplify the reverse zone file as well:
+Create the reverse zone file:
 
 ```bash
-sudo vi /var/named/est.intra.rev
+sudo nano /var/named/est.intra.rev
 ```
 
-Content:
+Add this content:
 
 ```
 $TTL 86400
 @       IN SOA  dns.est.intra. admin.est.intra. (
-                2023011001 ; Serial
+                2023011002 ; Serial
                 3600       ; Refresh
                 1800       ; Retry
                 604800     ; Expire
@@ -123,13 +99,38 @@ $TTL 86400
 10      IN PTR  dns.est.intra.
 ```
 
-Now let's modify the DHCP configuration to work with DDNS:
+Set proper permissions:
 
 ```bash
-sudo vi /etc/dhcp/dhcpd.conf
+sudo chown named:named /var/named/est.intra.zone
+sudo chown named:named /var/named/est.intra.rev
+sudo chmod 644 /var/named/est.intra.zone
+sudo chmod 644 /var/named/est.intra.rev
 ```
 
-Update with the following content:
+## Step 2: Generate DDNS Key
+
+If you haven't successfully generated a key yet, let's create one manually:
+
+```bash
+# Generate a random string to use as your key
+openssl rand -base64 16 > /tmp/ddns-key.txt
+
+# View the generated key
+cat /tmp/ddns-key.txt
+```
+
+Take note of the generated key, and replace "YourGeneratedSecretKeyHere" in the named.conf file with this key.
+
+## Step 3: Configure DHCP with DDNS Integration
+
+Now, let's set up the DHCP configuration:
+
+```bash
+sudo nano /etc/dhcp/dhcpd.conf
+```
+
+Add this content:
 
 ```
 # DDNS configuration
@@ -138,10 +139,13 @@ ddns-update-style interim;
 update-static-leases on;
 use-host-decl-names on;
 
-# Include the DDNS key
-include "/etc/named/ddns.key";
+# Define the DDNS key (must match the one in named.conf)
+key "ddns-key.est.intra" {
+    algorithm hmac-md5;
+    secret "YourGeneratedSecretKeyHere"; # Replace with the same key used in named.conf
+};
 
-# DNS zone update configurations
+# DNS update configuration
 zone est.intra. {
     key ddns-key.est.intra;
     primary 192.168.1.10;
@@ -152,128 +156,110 @@ zone 1.168.192.in-addr.arpa. {
     primary 192.168.1.10;
 }
 
+# Basic network settings
 option domain-name "est.intra";
 option domain-name-servers 192.168.1.10;
 default-lease-time 600;
 max-lease-time 7200;
 authoritative;
 
+# Define the subnet
 subnet 192.168.1.0 netmask 255.255.255.0 {
-  range 192.168.1.50 192.168.1.150;
-  option routers 192.168.1.1;
-  option broadcast-address 192.168.1.255;
-  
-  # Fixed IP for client
-  host client {
-    hardware ethernet AA:BB:CC:DD:EE:FF;  # Replace with actual MAC address
-    fixed-address 192.168.1.100;
-    option host-name "client.est.intra";
-    ddns-hostname "client";
-    ddns-domain-name "est.intra";
-  }
+    range 192.168.1.50 192.168.1.150;
+    option routers 192.168.1.1;
+    option broadcast-address 192.168.1.255;
+    
+    # Set client hostname/domain to be updated in DNS
+    ddns-hostname = concat("client-", binary-to-ascii(10, 8, "-", leased-address));
+    ddns-domain-name = "est.intra";
+    
+    # Static IP assignment for specific client (optional)
+    host client {
+        hardware ethernet AA:BB:CC:DD:EE:FF;  # Replace with actual MAC address
+        fixed-address 192.168.1.100;
+        option host-name "client.est.intra";
+        ddns-hostname "client";
+        ddns-domain-name "est.intra";
+    }
 }
 ```
 
-Set proper file permissions:
+Make sure to replace "YourGeneratedSecretKeyHere" with the same key you used in the named.conf file.
+
+## Step 4: Specify DHCP Interface
+
+You might need to specify which network interface DHCP should listen on:
 
 ```bash
-# Secure the key file
-sudo chmod 640 /etc/named/ddns.key
-sudo chown root:named /etc/named/ddns.key
-
-# Make sure named can write to the zone files
-sudo chown named:named /var/named/est.intra.zone
-sudo chown named:named /var/named/est.intra.rev
-sudo chmod 644 /var/named/est.intra.zone
-sudo chmod 644 /var/named/est.intra.rev
-
-# Make the key accessible to DHCP server
-sudo chgrp dhcpd /etc/named/ddns.key
-sudo chmod 640 /etc/named/ddns.key
+sudo nano /etc/sysconfig/dhcpd
 ```
 
-Now restart both services:
+Add this line (replace eth0 with your actual network interface name):
+
+```
+DHCPDARGS=eth0
+```
+
+## Step 5: Set SELinux Context (if SELinux is enabled)
 
 ```bash
-sudo systemctl restart named
-sudo systemctl restart dhcpd
+sudo restorecon -r /var/named
+sudo restorecon -r /etc/named.conf
+sudo restorecon -r /etc/dhcp
+```
 
-# Verify the services are running
+## Step 6: Start and Enable Services
+
+```bash
+# Enable and start DNS
+sudo systemctl enable named
+sudo systemctl start named
+
+# Enable and start DHCP
+sudo systemctl enable dhcpd
+sudo systemctl start dhcpd
+
+# Check if the services are running
 sudo systemctl status named
 sudo systemctl status dhcpd
 ```
 
-## Client Configuration
-
-For DDNS to work properly, you'll want to configure the client to use DHCP. On the client machine:
+## Step 7: Open Firewall Ports
 
 ```bash
-# On the client VM
-# Configure to use DHCP
-sudo nmcli con mod "System eth0" ipv4.method auto
-sudo nmcli con up "System eth0"
-
-# You can explicitly set the hostname if you want
-sudo hostnamectl set-hostname client.est.intra
+sudo firewall-cmd --permanent --add-service=dns
+sudo firewall-cmd --permanent --add-service=dhcp
+sudo firewall-cmd --reload
 ```
 
-## Testing DDNS
+## Verification
 
-To test that dynamic DNS updates are working:
+Once the client connects to the DHCP server, it should receive:
+1. An IP address (e.g., 192.168.1.100)
+2. A hostname based on the IP (e.g., client-192-168-1-100.est.intra)
+3. The DNS server will be automatically updated with this hostname and IP
 
-1. On the client, request a new IP address:
-   ```bash
-   sudo dhclient -v -r eth0
-   sudo dhclient -v eth0
-   ```
+You can verify this on the client with:
 
-2. Check the client's network configuration:
-   ```bash
-   ip addr show eth0
-   cat /etc/resolv.conf
-   ```
+```bash
+# On client
+hostname
+ip addr
+cat /etc/resolv.conf
+```
 
-3. On the server, check if the DNS records have been updated:
-   ```bash
-   sudo rndc dumpdb -zones
-   sudo cat /var/named/data/named_dump.db
-   
-   # Or query the DNS server directly
-   dig @192.168.1.10 client.est.intra
-   dig @192.168.1.10 -x 192.168.1.100
-   ```
+And on the server with:
 
-4. From the client, test name resolution:
-   ```bash
-   nslookup client.est.intra
-   nslookup dns.est.intra
-   ping -c 4 dns.est.intra
-   ```
+```bash
+# On server
+dig @192.168.1.10 client-192-168-1-100.est.intra
+```
 
-## Troubleshooting
+If you encounter any specific errors, check the logs:
 
-If you encounter issues:
+```bash
+sudo journalctl -u named
+sudo journalctl -u dhcpd
+```
 
-1. Check the logs:
-   ```bash
-   sudo journalctl -u named
-   sudo journalctl -u dhcpd
-   ```
-
-2. Test manual DDNS updates to verify your configuration:
-   ```bash
-   # On the server, using nsupdate tool
-   nsupdate -k /path/to/Kddns-key.est.intra.+157+12345.private
-   > server 192.168.1.10
-   > zone est.intra
-   > update add test.est.intra 86400 A 192.168.1.200
-   > send
-   > quit
-   ```
-
-3. Verify the update with:
-   ```bash
-   dig @192.168.1.10 test.est.intra
-   ```
-
-This DDNS setup allows clients to automatically register themselves in DNS when they receive IP addresses from DHCP, making it easier to manage your network and keep DNS records up to date.
+This configuration will ensure that any device connecting to your DHCP server will automatically get registered in DNS with a hostname derived from its IP address.
