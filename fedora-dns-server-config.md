@@ -1,65 +1,21 @@
-I'll generate all the essential files you need for your DNS/DHCP setup to ensure everything works correctly, including forward and reverse lookups.
+I see the issue. Your DHCP client is receiving an IP address (192.168.1.108) successfully, but there's a permission denied error when trying to update /etc/resolv.conf, and DNS reverse lookup is still failing.
 
-## 1. Main DNS Configuration (/etc/named.conf)
+Let's fix the configuration on both the server and client sides:
 
-```
-options {
-    listen-on port 53 { 127.0.0.1; 192.168.1.10; };
-    listen-on-v6 port 53 { ::1; };
-    directory     "/var/named";
-    dump-file     "/var/named/data/cache_dump.db";
-    statistics-file "/var/named/data/named_stats.txt";
-    memstatistics-file "/var/named/data/named_mem_stats.txt";
-    secroots-file "/var/named/data/named.secroots";
-    recursing-file "/var/named/data/named.recursing";
-    allow-query     { localhost; 192.168.1.0/24; };
-    forwarders      { 8.8.8.8; 8.8.4.4; };
-    forward         first;
-    recursion yes;
-    dnssec-validation no;
-    pid-file "/run/named/named.pid";
-    session-keyfile "/run/named/session.key";
-};
+### 1. Server-side fixes
 
-key "ddns-key.est.intra" {
-    algorithm hmac-md5;
-    secret "abcdefghijklmnopqrstuvwxyz123456";
-};
+First, fix the reverse DNS lookup issue:
 
-zone "est.intra" IN {
-    type master;
-    file "est.intra.zone";
-    allow-update { key "ddns-key.est.intra"; };
-};
-
-zone "1.168.192.in-addr.arpa" IN {
-    type master;
-    file "est.intra.rev";
-    allow-update { key "ddns-key.est.intra"; };
-};
+1. Edit the reverse zone file on your DNS server:
+```bash
+sudo nano /var/named/est.intra.rev
 ```
 
-## 2. Forward Zone File (/var/named/est.intra.zone)
-
+2. Ensure it contains these lines:
 ```
 $TTL 86400
 @       IN SOA  dns.est.intra. admin.est.intra. (
-                2023011005 ; Serial
-                3600       ; Refresh
-                1800       ; Retry
-                604800     ; Expire
-                86400      ; Minimum TTL
-)
-@       IN NS   dns
-dns     IN A    192.168.1.10
-```
-
-## 3. Reverse Zone File (/var/named/est.intra.rev)
-
-```
-$TTL 86400
-@       IN SOA  dns.est.intra. admin.est.intra. (
-                2023011005 ; Serial
+                2023011006 ; Serial
                 3600       ; Refresh
                 1800       ; Retry
                 604800     ; Expire
@@ -67,103 +23,51 @@ $TTL 86400
 )
 @       IN NS   dns.est.intra.
 10      IN PTR  dns.est.intra.
+108     IN PTR  client.est.intra.
 ```
 
-## 4. DHCP Configuration (/etc/dhcp/dhcpd.conf)
-
-```
-# Basic DHCP settings
-default-lease-time 3600;
-max-lease-time 86400;
-authoritative;
-
-# DDNS configuration
-ddns-updates on;
-ddns-update-style interim;
-update-static-leases on;
-
-# DDNS key
-key "ddns-key.est.intra" {
-    algorithm hmac-md5;
-    secret "abcdefghijklmnopqrstuvwxyz123456";
-};
-
-# Zone information
-zone est.intra. {
-    primary 192.168.1.10;
-    key ddns-key.est.intra;
-}
-
-zone 1.168.192.in-addr.arpa. {
-    primary 192.168.1.10;
-    key ddns-key.est.intra;
-}
-
-# Network configuration
-option domain-name "est.intra";
-option domain-name-servers 192.168.1.10;
-
-subnet 192.168.1.0 netmask 255.255.255.0 {
-    range 192.168.1.50 192.168.1.150;
-    option routers 192.168.1.1;
-    option broadcast-address 192.168.1.255;
-    
-    option host-name "client";
-    ddns-hostname "client";
-    ddns-domain-name = "est.intra";
-}
-```
-
-## 5. Commands to Apply Configuration
-
+3. Restart the named service:
 ```bash
-# Set permissions for DNS files
-sudo chown named:named /var/named/est.intra.zone
-sudo chown named:named /var/named/est.intra.rev
-sudo chmod 664 /var/named/est.intra.zone
-sudo chmod 664 /var/named/est.intra.rev
-
-# Handle SELinux (if enabled)
-sudo setenforce 0
-sudo setsebool -P named_write_master_zones 1
-sudo restorecon -rv /var/named
-sudo restorecon -v /etc/named.conf
-sudo restorecon -v /etc/dhcp/dhcpd.conf
-
-# Setup DHCP interface (adjust interface name if needed)
-echo "DHCPDARGS=eth0" | sudo tee /etc/sysconfig/dhcpd
-
-# Restart services
 sudo systemctl restart named
-sudo systemctl restart dhcpd
-
-# Enable services at boot
-sudo systemctl enable named
-sudo systemctl enable dhcpd
-
-# Open firewall ports
-sudo firewall-cmd --permanent --add-service=dns
-sudo firewall-cmd --permanent --add-service=dhcp
-sudo firewall-cmd --reload
 ```
 
-## 6. Verification Commands
+### 2. Client-side fixes
 
+The "Permission denied" error suggests the dhclient script doesn't have permission to update /etc/resolv.conf. This could be because resolvconf is running or the file is write-protected.
+
+1. Fix the resolv.conf permissions:
 ```bash
-# Check DNS server
-sudo systemctl status named
-dig @192.168.1.10 dns.est.intra
-dig @192.168.1.10 -x 192.168.1.10
+sudo chattr -i /etc/resolv.conf  # Remove immutable flag if present
+sudo chmod 644 /etc/resolv.conf  # Make it writable
+```
 
-# Check DHCP server
-sudo systemctl status dhcpd
-cat /var/lib/dhcpd/dhcpd.leases
+2. Manually update resolv.conf to use your DNS server:
+```bash
+echo "nameserver 192.168.1.10" | sudo tee /etc/resolv.conf
+echo "search est.intra" | sudo tee -a /etc/resolv.conf
+```
 
-# Test client connection (run on client)
+3. Request a new IP lease:
+```bash
 sudo dhclient -r
 sudo dhclient
-hostname
-ping dns.est.intra
 ```
 
-These files and commands should give you a complete and working setup for your DNS/DHCP configuration with the "client.est.intra" domain assigned to all DHCP clients.
+4. Verify that DNS is working:
+```bash
+nslookup dns.est.intra
+nslookup client.est.intra
+```
+
+5. Verify the hostname is set correctly:
+```bash
+hostname
+hostname -f
+```
+
+If the hostname isn't set to "client.est.intra", set it manually:
+```bash
+sudo hostnamectl set-hostname client.est.intra
+```
+
+These changes should fix the DNS resolution and ensure your client machine gets the domain name "client.est.intra" as intended.
