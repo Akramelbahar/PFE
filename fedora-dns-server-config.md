@@ -6,6 +6,7 @@ authoritative;
 # DDNS configuration
 ddns-updates on;
 ddns-update-style interim;
+update-static-leases on;
 
 # DDNS key
 key "ddns-key.est.intra" {
@@ -34,5 +35,5 @@ subnet 192.168.1.0 netmask 255.255.255.0 {
     option broadcast-address 192.168.1.255;
     
     ddns-hostname = concat("client-", binary-to-ascii(10, 8, "-", leased-address));
-    ddns-domain-name "est.intra";
+    ddns-domain-name = "est.intra";
 }
