@@ -1,21 +1,61 @@
-I see the issue. Your DHCP client is receiving an IP address (192.168.1.108) successfully, but there's a permission denied error when trying to update /etc/resolv.conf, and DNS reverse lookup is still failing.
+I'll provide you with complete, error-free configurations for both DNS and DHCP servers that will automatically assign the domain name "client.est.intra" to any device connecting through DHCP.
 
-Let's fix the configuration on both the server and client sides:
+## Server Configuration Files
 
-### 1. Server-side fixes
+### 1. DNS Server Configuration (/etc/named.conf)
+```
+options {
+    listen-on port 53 { 127.0.0.1; 192.168.1.10; };
+    listen-on-v6 port 53 { ::1; };
+    directory     "/var/named";
+    dump-file     "/var/named/data/cache_dump.db";
+    statistics-file "/var/named/data/named_stats.txt";
+    memstatistics-file "/var/named/data/named_mem_stats.txt";
+    recursing-file "/var/named/data/named.recursing";
+    allow-query     { localhost; 192.168.1.0/24; };
+    recursion yes;
+    dnssec-validation no;
+    pid-file "/run/named/named.pid";
+    session-keyfile "/run/named/session.key";
+};
 
-First, fix the reverse DNS lookup issue:
+key "ddns-key.est.intra" {
+    algorithm hmac-md5;
+    secret "abcdefghijklmnopqrstuvwxyz123456";
+};
 
-1. Edit the reverse zone file on your DNS server:
-```bash
-sudo nano /var/named/est.intra.rev
+zone "est.intra" IN {
+    type master;
+    file "est.intra.zone";
+    allow-update { key "ddns-key.est.intra"; };
+};
+
+zone "1.168.192.in-addr.arpa" IN {
+    type master;
+    file "est.intra.rev";
+    allow-update { key "ddns-key.est.intra"; };
+};
 ```
 
-2. Ensure it contains these lines:
+### 2. Forward Zone File (/var/named/est.intra.zone)
 ```
 $TTL 86400
-@       IN SOA  dns.est.intra. admin.est.intra. (
-                2023011006 ; Serial
+@       IN SOA  dns.est.intra. root.est.intra. (
+                2023011001 ; Serial
+                3600       ; Refresh
+                1800       ; Retry
+                604800     ; Expire
+                86400      ; Minimum TTL
+)
+@       IN NS   dns
+dns     IN A    192.168.1.10
+```
+
+### 3. Reverse Zone File (/var/named/est.intra.rev)
+```
+$TTL 86400
+@       IN SOA  dns.est.intra. root.est.intra. (
+                2023011001 ; Serial
                 3600       ; Refresh
                 1800       ; Retry
                 604800     ; Expire
@@ -23,51 +63,117 @@ $TTL 86400
 )
 @       IN NS   dns.est.intra.
 10      IN PTR  dns.est.intra.
-108     IN PTR  client.est.intra.
 ```
 
-3. Restart the named service:
+### 4. DHCP Configuration (/etc/dhcp/dhcpd.conf)
+```
+# Basic DHCP settings
+default-lease-time 3600;
+max-lease-time 86400;
+authoritative;
+
+# DDNS settings
+ddns-updates on;
+ddns-update-style interim;
+ignore client-updates;
+
+# DDNS key
+key "ddns-key.est.intra" {
+    algorithm hmac-md5;
+    secret "abcdefghijklmnopqrstuvwxyz123456";
+};
+
+# DNS update zones
+zone est.intra. {
+    primary 192.168.1.10;
+    key ddns-key.est.intra;
+}
+
+zone 1.168.192.in-addr.arpa. {
+    primary 192.168.1.10;
+    key ddns-key.est.intra;
+}
+
+# Global options
+option domain-name "est.intra";
+option domain-name-servers 192.168.1.10;
+
+# Subnet configuration
+subnet 192.168.1.0 netmask 255.255.255.0 {
+    range 192.168.1.50 192.168.1.150;
+    option routers 192.168.1.1;
+    option broadcast-address 192.168.1.255;
+    
+    # Force all clients to use the same hostname
+    option host-name "client";
+    ddns-hostname "client";
+    ddns-domain-name = "est.intra";
+}
+```
+
+### 5. DHCP Interface Configuration (/etc/sysconfig/dhcpd)
+```
+# Replace eth0 with your actual network interface name
+DHCPDARGS=enp0s8
+```
+
+## Setup Commands
+
+Run these commands to set up everything properly:
+
 ```bash
+# Set correct permissions
+sudo chown named:named /var/named/est.intra.zone
+sudo chown named:named /var/named/est.intra.rev
+sudo chmod 664 /var/named/est.intra.zone
+sudo chmod 664 /var/named/est.intra.rev
+
+# Disable SELinux temporarily
+sudo setenforce 0
+
+# Set SELinux contexts correctly
+sudo setsebool -P named_write_master_zones 1
+sudo restorecon -rv /var/named
+sudo restorecon -v /etc/named.conf
+sudo restorecon -v /etc/dhcp/dhcpd.conf
+
+# Restart services
 sudo systemctl restart named
+sudo systemctl restart dhcpd
+
+# Enable services to start at boot
+sudo systemctl enable named
+sudo systemctl enable dhcpd
+
+# Open firewall ports
+sudo firewall-cmd --permanent --add-service=dns
+sudo firewall-cmd --permanent --add-service=dhcp
+sudo firewall-cmd --reload
 ```
 
-### 2. Client-side fixes
+## Verification
 
-The "Permission denied" error suggests the dhclient script doesn't have permission to update /etc/resolv.conf. This could be because resolvconf is running or the file is write-protected.
+On your client machine, run:
 
-1. Fix the resolv.conf permissions:
-```bash
-sudo chattr -i /etc/resolv.conf  # Remove immutable flag if present
-sudo chmod 644 /etc/resolv.conf  # Make it writable
-```
-
-2. Manually update resolv.conf to use your DNS server:
-```bash
-echo "nameserver 192.168.1.10" | sudo tee /etc/resolv.conf
-echo "search est.intra" | sudo tee -a /etc/resolv.conf
-```
-
-3. Request a new IP lease:
 ```bash
 sudo dhclient -r
 sudo dhclient
-```
 
-4. Verify that DNS is working:
-```bash
-nslookup dns.est.intra
-nslookup client.est.intra
-```
-
-5. Verify the hostname is set correctly:
-```bash
+# Check hostname
 hostname
-hostname -f
+
+# Check DNS configuration
+cat /etc/resolv.conf
+
+# Test DNS resolution
+nslookup client.est.intra
+nslookup dns.est.intra
 ```
 
-If the hostname isn't set to "client.est.intra", set it manually:
-```bash
-sudo hostnamectl set-hostname client.est.intra
-```
+This configuration will:
+1. Set up a DNS server that allows dynamic updates
+2. Configure a DHCP server that assigns IPs and updates DNS records
+3. Force all clients to use "client.est.intra" as their hostname
+4. Set the necessary permissions and contexts for everything to work
 
-These changes should fix the DNS resolution and ensure your client machine gets the domain name "client.est.intra" as intended.
+Note: When multiple clients connect, they will all get the same DNS name "client.est.intra" but with different IP addresses. The most recent client to connect will be the one that resolves to that name in DNS.
