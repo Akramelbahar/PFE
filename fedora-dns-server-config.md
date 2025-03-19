@@ -27,7 +27,10 @@ sudo nmcli connection add type ethernet con-name lan-network ifname eth0 ip4 192
 sudo nmcli connection add type ethernet con-name dmz-network ifname eth1 ip4 192.168.2.10/24
 
 # Enable IP forwarding (so the machine can route packets between networks)
-sudo echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+# Specify both interfaces and the DHCP server IP
+DHCRELAY_OPTS="-d --no-pid -i enp0s8 -i enp0s9 192.168.2.1"
+
+
 sudo sysctl -p
 
 # Configure DHCP relay to forward requests from LAN to DMZ server
