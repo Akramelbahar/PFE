@@ -328,3 +328,14 @@ sudo dhclient
    ```
 
 These comprehensive configurations address all components of your network setup and should resolve the issues you've been experiencing. The key changes include correctly configuring the DHCP server to handle both networks, setting up proper DNS entries, and implementing direct packet forwarding on the relay agent to bypass the problematic dhcrelay service.
+
+
+
+# On the relay agent
+# Remove the incorrect default routes
+sudo ip route del default via 192.168.1.10 dev enp0s8
+sudo ip route del default via 10.0.4.2 dev enp0s9
+
+# The relay agent doesn't need a default route since it's connecting two networks
+# Just make sure the direct routes to both networks are correct:
+ip route show | grep -v default
