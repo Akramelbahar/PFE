@@ -583,50 +583,82 @@ This suggests that your DNS server is working correctly, but there's a disconnec
 
 After making these changes, test with ping and curl again. If it still doesn't work, please check if your system has any other DNS resolving services running like dnsmasq or resolvconf.
  HOOOOLD 
- I notice that there's an issue in your DHCP relay configuration. Based on the network interfaces you showed earlier, you need to update the configuration to use the correct interfaces. Let me fix that for you:
+
+ I see we're still having issues with the dhcrelay service. Let's try a more direct approach by creating a custom systemd service file instead of relying on the default configuration.
+
+Here's what we'll do:
 
 ```bash
-# Enable IP forwarding
-sudo sysctl -w net.ipv4.ip_forward=1
-sudo sh -c 'echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf'
-sudo sysctl -p
+# First, let's check the syntax that your version of dhcrelay accepts
+dhcrelay --help
+
+# Now, let's create a custom systemd service file
+sudo nano /etc/systemd/system/dhcrelay.service
 ```
 
-For the DHCP relay configuration, the issue is that you're using enp0s8 and enp0s9, but from your previous output I see that the LAN interface is actually enp0s3 and the DMZ interface is enp0s8:
+Add the following content:
 
-```bash
-# Install DHCP relay
-sudo dnf install -y dhcp-relay
+```
+[Unit]
+Description=DHCPv4 Relay Agent
+After=network.target
 
-# Configure DHCP relay - notice the correct interface names
-sudo nano /etc/sysconfig/dhcrelay
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dhcrelay -d -i enp0s3 -i enp0s8 192.168.2.1
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-Add this corrected content:
-```
-# Point to the DHCP server and specify interfaces
-DHCRELAY_OPTS="-d -i enp0s3 -i enp0s8 192.168.2.1"
-```
+Then reload systemd and try starting the service:
 
-Note that I've removed the `--no-pid` option which might be causing issues. The syntax above is more likely to work with Fedora's dhcrelay.
-
-Start and enable DHCP relay:
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl restart dhcrelay
-sudo systemctl enable dhcrelay
+sudo systemctl start dhcrelay
 sudo systemctl status dhcrelay
 ```
 
-And for the firewall configuration, update it with the correct interfaces:
-```bash
-# Configure firewall to allow traffic between networks
-sudo firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -i enp0s3 -o enp0s8 -j ACCEPT
-sudo firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -i enp0s8 -o enp0s3 -j ACCEPT
+If this still fails, let's try an even simpler approach by running dhcrelay directly with no options except the target server:
 
-# Allow DHCP traffic
+```bash
+sudo nano /etc/systemd/system/dhcrelay.service
+```
+
+Update it to:
+```
+[Unit]
+Description=DHCPv4 Relay Agent
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/dhcrelay 192.168.2.1
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Then reload and restart:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl start dhcrelay
+sudo systemctl status dhcrelay
+```
+
+If you're still having issues with the dhcrelay service, we can implement a workaround by using IP forwarding alone instead. Since you already have IP forwarding enabled, this might be sufficient for your needs:
+
+```bash
+# Make sure IP forwarding is enabled
+sudo sysctl -w net.ipv4.ip_forward=1
+sudo sh -c 'echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf'
+sudo sysctl -p
+
+# Configure firewall to allow DHCP traffic
 sudo firewall-cmd --permanent --add-service=dhcp
 sudo firewall-cmd --reload
 ```
 
-These changes should fix your DHCP relay configuration to use the correct network interfaces.
+The IP forwarding setup may be sufficient for your network to function, especially if your DHCP server is properly configured to handle requests from both networks.
