@@ -582,3 +582,51 @@ This suggests that your DNS server is working correctly, but there's a disconnec
     ```
 
 After making these changes, test with ping and curl again. If it still doesn't work, please check if your system has any other DNS resolving services running like dnsmasq or resolvconf.
+ HOOOOLD 
+ I notice that there's an issue in your DHCP relay configuration. Based on the network interfaces you showed earlier, you need to update the configuration to use the correct interfaces. Let me fix that for you:
+
+```bash
+# Enable IP forwarding
+sudo sysctl -w net.ipv4.ip_forward=1
+sudo sh -c 'echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf'
+sudo sysctl -p
+```
+
+For the DHCP relay configuration, the issue is that you're using enp0s8 and enp0s9, but from your previous output I see that the LAN interface is actually enp0s3 and the DMZ interface is enp0s8:
+
+```bash
+# Install DHCP relay
+sudo dnf install -y dhcp-relay
+
+# Configure DHCP relay - notice the correct interface names
+sudo nano /etc/sysconfig/dhcrelay
+```
+
+Add this corrected content:
+```
+# Point to the DHCP server and specify interfaces
+DHCRELAY_OPTS="-d -i enp0s3 -i enp0s8 192.168.2.1"
+```
+
+Note that I've removed the `--no-pid` option which might be causing issues. The syntax above is more likely to work with Fedora's dhcrelay.
+
+Start and enable DHCP relay:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart dhcrelay
+sudo systemctl enable dhcrelay
+sudo systemctl status dhcrelay
+```
+
+And for the firewall configuration, update it with the correct interfaces:
+```bash
+# Configure firewall to allow traffic between networks
+sudo firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -i enp0s3 -o enp0s8 -j ACCEPT
+sudo firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -i enp0s8 -o enp0s3 -j ACCEPT
+
+# Allow DHCP traffic
+sudo firewall-cmd --permanent --add-service=dhcp
+sudo firewall-cmd --reload
+```
+
+These changes should fix your DHCP relay configuration to use the correct network interfaces.
