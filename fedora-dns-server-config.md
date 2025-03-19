@@ -465,3 +465,120 @@ sudo setenforce 0  # Temporarily disable
 ```
 
 This comprehensive guide covers all the steps needed to set up your network architecture with LAN, DMZ, relay agent, DHCP, DNS, and web services. Follow these steps sequentially to ensure proper configuration.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+HOLD ON 
+
+
+
+I see an interesting situation here. Your DNS query to look up www.est.intra is successfully returning the correct IP address (192.168.2.1), but ping and curl are still failing with name resolution errors.
+
+This suggests that your DNS server is working correctly, but there's a disconnect between your DNS resolution tool and the system utilities. Let's fix this:
+
+1. **Check which resolver your system is using**:
+   ```bash
+   cat /etc/nsswitch.conf | grep hosts
+   ```
+   Look for a line like `hosts: files dns myhostname`
+
+2. **Verify your resolv.conf again** and make sure it hasn't been overwritten:
+   ```bash
+   cat /etc/resolv.conf
+   ```
+   
+3. **Explicitly set DNS server for testing**:
+   ```bash
+   sudo nano /etc/resolv.conf
+   ```
+   Make sure it only contains:
+   ```
+   nameserver 192.168.2.1
+   search est.intra
+   ```
+   Save and exit.
+
+4. **Flush DNS cache**:
+   ```bash
+   sudo systemd-resolve --flush-caches
+   ```
+   
+5. **Try with explicit DNS server**:
+   ```bash
+   ping -c 1 www.est.intra
+   curl --dns-servers 192.168.2.1 www.est.intra
+   ```
+
+6. **Check network connectivity** to the server IP directly:
+   ```bash
+   ping -c 1 192.168.2.1
+   curl http://192.168.2.1
+   ```
+
+7. **Check hosts file** to make sure there are no conflicting entries:
+   ```bash
+   cat /etc/hosts
+   ```
+
+8. **Check NetworkManager DNS override**:
+   ```bash
+   nmcli device show | grep DNS
+   ```
+
+9. **Try temporarily disabling any local DNS caching service**:
+   ```bash
+   sudo systemctl stop systemd-resolved
+   sudo systemctl disable systemd-resolved
+   ```
+
+10. **Edit NetworkManager configuration** to ensure it's not overriding your DNS settings:
+    ```bash
+    sudo nano /etc/NetworkManager/NetworkManager.conf
+    ```
+    Add or ensure these lines are present:
+    ```
+    [main]
+    dns=none
+    ```
+    Then restart NetworkManager:
+    ```bash
+    sudo systemctl restart NetworkManager
+    ```
+
+11. **Test if routing between networks works correctly**:
+    ```bash
+    traceroute 192.168.2.1
+    ```
+
+12. **Check if DNS service on 192.168.2.1 is actually reachable** from your current machine:
+    ```bash
+    nc -zv 192.168.2.1 53
+    ```
+
+After making these changes, test with ping and curl again. If it still doesn't work, please check if your system has any other DNS resolving services running like dnsmasq or resolvconf.
