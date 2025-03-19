@@ -1,427 +1,358 @@
-# DDNS with DHCP Configuration Guide for VirtualBox
+I'll help you set up a relay agent in Fedora to connect two networks with the specifications you've provided. Let me outline the complete setup and configuration steps for your network architecture.
 
-This guide will help you set up Dynamic DNS (DDNS) with DHCP in VirtualBox so that clients automatically receive domain information from your DNS server. The configuration is based on Fedora Server 39.
+# Network Architecture Setup for Fedora
 
-## Network Architecture
+## Network Overview
+- **LAN Network**: 192.168.1.0/24
+- **DMZ Network**: 192.168.2.0/24
+- **Relay Agent**: Connects both networks
+  - LAN Interface: 192.168.1.10
+  - DMZ Interface: 192.168.2.10
+- **DMZ Server**: 192.168.2.1
+  - Services: DHCP, DNS (dns.est.intra), Web Server (www.est.intra)
+- **Client(s)**: In 192.168.1.0/24 network, obtaining IP via DHCP
 
-We'll follow the architecture from the PDF:
-- DNS + DHCP Server: Placed in DMZ zone with IP 192.168.2.1
-- Clients: LAN zone with IP range 192.168.1.11-254
+## 1. Setting Up the Relay Agent
 
-## Step 1: VirtualBox Network Setup
-
-1. Create two VirtualBox machines:
-   - Server (Fedora Server 39): Will function as both DNS and DHCP server
-   - Client: Will receive IP address and domain info from the server
-
-2. Configure VirtualBox networking:
-   - Create two host-only networks in VirtualBox:
-     - vboxnet0 (192.168.1.0/24) for the LAN
-     - vboxnet1 (192.168.2.0/24) for the DMZ
-
-3. Server VM network adapters:
-   - Adapter 1: Host-only adapter attached to vboxnet1 (DMZ network)
-   - Adapter 2: Host-only adapter attached to vboxnet0 (LAN network)
-   
-4. Client VM network adapter:
-   - Adapter 1: Host-only adapter attached to vboxnet0 (LAN network)
-
-## Step 2: Install Required Packages on Server
+First, we need to configure the relay agent machine with two network interfaces:
 
 ```bash
-sudo dnf update
-sudo dnf install bind bind-utils dhcp-server
+# Install required packages
+sudo dnf install dhcp-relay
+
+# Configure the first network interface (LAN)
+sudo nmcli connection add type ethernet con-name lan-network ifname eth0 ip4 192.168.1.10/24
+
+# Configure the second network interface (DMZ)
+sudo nmcli connection add type ethernet con-name dmz-network ifname eth1 ip4 192.168.2.10/24
+
+# Enable IP forwarding (so the machine can route packets between networks)
+sudo echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+sudo sysctl -p
+
+# Configure DHCP relay to forward requests from LAN to DMZ server
+sudo dnf install dhcp-relay
 ```
 
-## Step 3: Configure DNS Server (BIND)
+Now configure the DHCP relay by editing `/etc/dhcp/dhcrelay.conf`:
 
-1. Edit the main DNS configuration file:
+```
+# Point to the DHCP server in DMZ
+DHCRELAY_OPTS="-i eth0 -i eth1 192.168.2.1"
+```
+
+Start the DHCP relay service:
 
 ```bash
-sudo nano /etc/named.conf
+sudo systemctl enable --now dhcrelay
 ```
 
-2. Configure the DNS server with the following content:
+## 2. DMZ Server Configuration (192.168.2.1)
 
-```
-options {
-        listen-on port 53 { 127.0.0.1; 192.168.2.1; 192.168.1.2; };
-        listen-on-v6 port 53 { ::1; };
-        directory "/var/named";
-        dump-file "/var/named/data/cache_dump.db";
-        statistics-file "/var/named/data/named_stats.txt";
-        memstatistics-file "/var/named/data/named_mem_stats.txt";
-        allow-query { localhost; 192.168.1.0/24; 192.168.2.0/24; };
-        recursion yes;
-        
-        # For DDNS
-        allow-new-zones yes;
-        dnssec-validation no;
-        allow-transfer { none; };
-};
-
-logging {
-        channel default_debug {
-                file "data/named.run";
-                severity dynamic;
-        };
-};
-
-# Key for secure DDNS updates
-key "dhcp-key" {
-        algorithm hmac-md5;
-        secret "YourSecretKeyHere"; # Generate with dnssec-keygen
-};
-
-# Forward zone
-zone "est.intra" {
-        type master;
-        file "est.intra.zone";
-        allow-update { key "dhcp-key"; };
-};
-
-# Reverse zone for DMZ network
-zone "2.168.192.in-addr.arpa" {
-        type master;
-        file "2.168.192.in-addr.arpa";
-        allow-update { key "dhcp-key"; };
-};
-
-# Reverse zone for LAN network
-zone "1.168.192.in-addr.arpa" {
-        type master;
-        file "1.168.192.in-addr.arpa";
-        allow-update { key "dhcp-key"; };
-};
-```
-
-3. Generate a DNSSEC key for secure updates:
+### 2.1 Basic Network Configuration
 
 ```bash
-sudo dnssec-keygen -a HMAC-MD5 -b 128 -n USER dhcp-key
+# Configure static IP for DMZ server
+sudo nmcli connection add type ethernet con-name dmz-server ifname eth0 ip4 192.168.2.1/24
 ```
 
-4. Get the key from the generated file:
+### 2.2 DHCP Server Configuration
 
 ```bash
-sudo cat Kdhcp-key.*.private | grep Key
-```
+# Install DHCP server
+sudo dnf install dhcp-server
 
-5. Replace "YourSecretKeyHere" in the named.conf file with the actual key.
-
-## Step 4: Create DNS Zone Files
-
-1. Create the forward zone file:
-
-```bash
-sudo nano /var/named/est.intra.zone
-```
-
-2. Add the following content:
-
-```
-$TTL 86400
-@       IN SOA  dns.est.intra. admin.est.intra. (
-                2023030101 ; serial
-                3600       ; refresh (1 hour)
-                1800       ; retry (30 minutes)
-                604800     ; expire (1 week)
-                86400      ; minimum (1 day)
-                )
-        IN NS   dns.est.intra.
-dns     IN A    192.168.2.1
-        IN A    192.168.1.2
-```
-
-3. Create the reverse zone file for the DMZ network:
-
-```bash
-sudo nano /var/named/2.168.192.in-addr.arpa
-```
-
-4. Add the following content:
-
-```
-$TTL 86400
-@       IN SOA  ns1.est.intra. admin.est.intra. (
-                2023030101 ; serial
-                3600       ; refresh (1 hour)
-                1800       ; retry (30 minutes)
-                604800     ; expire (1 week)
-                86400      ; minimum (1 day)
-                )
-        IN NS   ns1.est.intra.
-1       IN PTR  dns.est.intra.
-```
-
-5. Create the reverse zone file for the LAN network:
-
-```bash
-sudo nano /var/named/1.168.192.in-addr.arpa
-```
-
-6. Add the following content:
-
-```
-$TTL 86400
-@       IN SOA  ns1.est.intra. admin.est.intra. (
-                2023030101 ; serial
-                3600       ; refresh (1 hour)
-                1800       ; retry (30 minutes)
-                604800     ; expire (1 week)
-                86400      ; minimum (1 day)
-                )
-        IN NS   ns1.est.intra.
-2       IN PTR  dns.est.intra.
-```
-
-7. Set proper permissions for zone files:
-
-```bash
-sudo chown named:named /var/named/est.intra.zone
-sudo chown named:named /var/named/2.168.192.in-addr.arpa
-sudo chown named:named /var/named/1.168.192.in-addr.arpa
-sudo chmod 640 /var/named/est.intra.zone
-sudo chmod 640 /var/named/2.168.192.in-addr.arpa
-sudo chmod 640 /var/named/1.168.192.in-addr.arpa
-```
-
-## Step 5: Configure DHCP Server with DDNS
-
-1. Edit the DHCP configuration file:
-
-```bash
+# Edit DHCP configuration
 sudo nano /etc/dhcp/dhcpd.conf
 ```
 
-2. Add the following content:
+Add the following configuration to `/etc/dhcp/dhcpd.conf`:
 
 ```
-# DHCP Configuration with DDNS
-
-# DDNS update style
+# Global DHCP configuration
 ddns-update-style interim;
 ddns-domainname "est.intra.";
 ddns-rev-domainname "in-addr.arpa.";
-
-# Client domain prefix
-option host-name = concat("client", ".", option host-name);
-
-# DDNS security
-key "dhcp-key" {
-        algorithm hmac-md5;
-        secret "YourSecretKeyHere"; # Use the same key as in named.conf
-}
-
-# DDNS zones
-zone est.intra. {
-        key "dhcp-key";
-        primary 127.0.0.1;
-}
-
-zone 1.168.192.in-addr.arpa. {
-        key "dhcp-key";
-        primary 127.0.0.1;
-}
-
-# Global options
-option domain-name "est.intra";
-option domain-name-servers 192.168.2.1;
-
-# Update settings
 ddns-updates on;
 ignore client-updates;
 update-static-leases on;
-update-conflict-detection off;
-update-optimization off;
 
-# Lease time
-default-lease-time 3600;
-max-lease-time 7200;
-
-# LAN subnet
+# DHCP for LAN
 subnet 192.168.1.0 netmask 255.255.255.0 {
-        range 192.168.1.11 192.168.1.254;
-        option routers 192.168.1.2;
-        option broadcast-address 192.168.1.255;
+  range 192.168.1.100 192.168.1.200;
+  option routers 192.168.1.10;
+  option domain-name "est.intra";
+  option domain-name-servers 192.168.2.1;
+  default-lease-time 3600;
+  max-lease-time 7200;
 }
 
-# DMZ subnet (if needed)
+# DHCP for DMZ 
 subnet 192.168.2.0 netmask 255.255.255.0 {
-        range 192.168.2.11 192.168.2.254;
-        option routers 192.168.2.1;
-        option broadcast-address 192.168.2.255;
+  range 192.168.2.100 192.168.2.200;
+  option routers 192.168.2.10;
+  option domain-name "est.intra";
+  option domain-name-servers 192.168.2.1;
+  default-lease-time 3600;
+  max-lease-time 7200;
 }
 ```
 
-## Step 6: Configure Network Interfaces
-
-1. Configure the network interfaces on the server:
-
-```bash
-sudo nano /etc/sysconfig/network-scripts/ifcfg-enp0s3
-```
-
-2. Add the following content for the DMZ interface:
-
-```
-TYPE=Ethernet
-BOOTPROTO=static
-DEFROUTE=yes
-NAME=enp0s3
-DEVICE=enp0s3
-ONBOOT=yes
-IPADDR=192.168.2.1
-PREFIX=24
-```
-
-3. Configure the LAN interface:
-
-```bash
-sudo nano /etc/sysconfig/network-scripts/ifcfg-enp0s8
-```
-
-4. Add the following content:
-
-```
-TYPE=Ethernet
-BOOTPROTO=static
-NAME=enp0s8
-DEVICE=enp0s8
-ONBOOT=yes
-IPADDR=192.168.1.2
-PREFIX=24
-```
-
-5. Restart the network service:
-
-```bash
-sudo systemctl restart NetworkManager
-```
-
-## Step 7: Configure IP Forwarding
-
-1. Enable IP forwarding to allow the server to route between networks:
-
-```bash
-sudo echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
-sudo sysctl -p
-```
-
-## Step 8: Start and Enable Services
-
-1. Start and enable the DNS server:
-
-```bash
-sudo systemctl enable --now named
-```
-
-2. Start and enable the DHCP server:
+Enable and start the DHCP service:
 
 ```bash
 sudo systemctl enable --now dhcpd
 ```
 
-3. Allow DNS and DHCP services through the firewall:
+### 2.3 DNS Server Configuration
+
+```bash
+# Install DNS server packages
+sudo dnf install bind bind-utils
+
+# Configure the DNS service
+sudo nano /etc/named.conf
+```
+
+Replace the default content with the following configuration:
+
+```
+options {
+    listen-on port 53 { 127.0.0.1; 192.168.2.1; };
+    listen-on-v6 port 53 { ::1; };
+    directory "/var/named";
+    dump-file "/var/named/data/cache_dump.db";
+    statistics-file "/var/named/data/named_stats.txt";
+    memstatistics-file "/var/named/data/named_mem_stats.txt";
+    
+    allow-query { localhost; 192.168.1.0/24; 192.168.2.0/24; };
+    allow-transfer { localhost; };
+    
+    recursion yes;
+    dnssec-validation yes;
+    
+    /* For DDNS */
+    allow-update { 192.168.2.1; };
+};
+
+logging {
+    channel default_debug {
+        file "data/named.run";
+        severity dynamic;
+    };
+};
+
+/* Forward zone for est.intra */
+zone "est.intra" IN {
+    type master;
+    file "est.intra.zone";
+    allow-update { 192.168.2.1; };
+};
+
+/* Reverse zone for 192.168.1.0/24 */
+zone "1.168.192.in-addr.arpa" IN {
+    type master;
+    file "1.168.192.in-addr.arpa.zone";
+    allow-update { 192.168.2.1; };
+};
+
+/* Reverse zone for 192.168.2.0/24 */
+zone "2.168.192.in-addr.arpa" IN {
+    type master;
+    file "2.168.192.in-addr.arpa.zone";
+    allow-update { 192.168.2.1; };
+};
+```
+
+Now, create the forward zone file:
+
+```bash
+sudo nano /var/named/est.intra.zone
+```
+
+Add the following content:
+
+```
+$TTL 86400
+@       IN      SOA     dns.est.intra. admin.est.intra. (
+                        2024031901      ; Serial
+                        3600            ; Refresh
+                        1800            ; Retry
+                        604800          ; Expire
+                        86400 )         ; Minimum TTL
+
+@       IN      NS      dns.est.intra.
+@       IN      A       192.168.2.1
+
+dns     IN      A       192.168.2.1
+www     IN      A       192.168.2.1
+relay   IN      A       192.168.2.10
+lan-relay IN    A       192.168.1.10
+```
+
+Create the reverse zone files:
+
+```bash
+sudo nano /var/named/1.168.192.in-addr.arpa.zone
+```
+
+Add the following content:
+
+```
+$TTL 86400
+@       IN      SOA     dns.est.intra. admin.est.intra. (
+                        2024031901      ; Serial
+                        3600            ; Refresh
+                        1800            ; Retry
+                        604800          ; Expire
+                        86400 )         ; Minimum TTL
+
+@       IN      NS      dns.est.intra.
+10      IN      PTR     lan-relay.est.intra.
+```
+
+Next, create the second reverse zone file:
+
+```bash
+sudo nano /var/named/2.168.192.in-addr.arpa.zone
+```
+
+Add the following content:
+
+```
+$TTL 86400
+@       IN      SOA     dns.est.intra. admin.est.intra. (
+                        2024031901      ; Serial
+                        3600            ; Refresh
+                        1800            ; Retry
+                        604800          ; Expire
+                        86400 )         ; Minimum TTL
+
+@       IN      NS      dns.est.intra.
+1       IN      PTR     dns.est.intra.
+1       IN      PTR     www.est.intra.
+10      IN      PTR     relay.est.intra.
+```
+
+Set proper permissions on the zone files:
+
+```bash
+sudo chown named:named /var/named/est.intra.zone
+sudo chown named:named /var/named/1.168.192.in-addr.arpa.zone
+sudo chown named:named /var/named/2.168.192.in-addr.arpa.zone
+```
+
+Enable and start the DNS service:
+
+```bash
+sudo systemctl enable --now named
+```
+
+Configure the firewall to allow DNS queries:
 
 ```bash
 sudo firewall-cmd --permanent --add-service=dns
-sudo firewall-cmd --permanent --add-service=dhcp
 sudo firewall-cmd --reload
 ```
 
-## Step 9: Configure SELinux (if enabled)
-
-1. Allow BIND to modify zone files:
+### 2.4 Web Server Configuration
 
 ```bash
-sudo setsebool -P named_write_master_zones 1
+# Install Apache, PHP and MySQL
+sudo dnf install httpd php php-mysqlnd mariadb-server
+
+# Start and enable MariaDB (MySQL)
+sudo systemctl enable --now mariadb
+
+# Secure the MariaDB installation
+sudo mysql_secure_installation
+
+# Start and enable Apache
+sudo systemctl enable --now httpd
 ```
 
-2. Allow DHCP to update DNS zones:
+Configure the virtual hosts for www.est.intra:
 
 ```bash
-sudo setsebool -P dhcpd_read_db 1
+sudo nano /etc/httpd/conf.d/est.intra.conf
 ```
 
-## Step 10: Client Configuration
+Add the following content:
 
-1. Boot up the client VM.
-2. The client should automatically receive an IP address from the DHCP server.
-3. The client should also receive the domain name "est.intra" and the DNS server IP address.
-
-## Step 11: Verify the Setup
-
-1. On the server, check that the DHCP and DNS services are running:
-
-```bash
-sudo systemctl status named
-sudo systemctl status dhcpd
+```
+<VirtualHost *:80>
+    ServerName www.est.intra
+    ServerAlias www.est.intra
+    DocumentRoot /var/www/html/est.intra
+    ErrorLog /var/log/httpd/est.intra-error.log
+    CustomLog /var/log/httpd/est.intra-access.log combined
+    
+    <Directory /var/www/html/est.intra>
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+</VirtualHost>
 ```
 
-2. Check the DHCP leases:
+Create the document root directory and a sample PHP file:
 
 ```bash
-sudo cat /var/lib/dhcpd/dhcpd.leases
+sudo mkdir -p /var/www/html/est.intra
+sudo nano /var/www/html/est.intra/index.php
 ```
 
-3. Check the DNS zone files to see if client records have been added:
+Add a simple PHP script to test the setup:
 
-```bash
-sudo cat /var/named/est.intra.zone
-sudo cat /var/named/1.168.192.in-addr.arpa
+```php
+<?php
+echo "<h1>Welcome to www.est.intra!</h1>";
+echo "<p>Server is running on " . $_SERVER['SERVER_ADDR'] . "</p>";
+echo "<h2>PHP Information</h2>";
+phpinfo();
+?>
 ```
 
-4. On the client, verify that it can resolve DNS names:
+Set the correct ownership:
 
 ```bash
+sudo chown -R apache:apache /var/www/html/est.intra
+```
+
+Configure the firewall to allow HTTP:
+
+```bash
+sudo firewall-cmd --permanent --add-service=http
+sudo firewall-cmd --reload
+```
+
+Restart Apache to apply the changes:
+
+```bash
+sudo systemctl restart httpd
+```
+
+## 3. Testing the Setup
+
+Once all configurations are complete, you can test the setup:
+
+1. From a client machine in the 192.168.1.0/24 network:
+   - It should receive an IP address via DHCP
+   - DNS resolution for dns.est.intra and www.est.intra should work
+   - Web access to www.est.intra should display the PHP page
+
+Test commands from a client:
+
+```bash
+# Check if DHCP assigned an IP address
+ip addr
+
+# Test DNS resolution
 nslookup dns.est.intra
+nslookup www.est.intra
+
+# Test web access (via browser or curl)
+curl www.est.intra
 ```
 
-5. Verify that the client has been added to the DNS zone:
-
-```bash
-nslookup $(hostname)
-```
-
-## Troubleshooting
-
-If you encounter issues:
-
-1. Check the DNS server logs:
-
-```bash
-sudo journalctl -u named
-```
-
-2. Check the DHCP server logs:
-
-```bash
-sudo journalctl -u dhcpd
-```
-
-3. Test the DNS configuration:
-
-```bash
-sudo named-checkconf /etc/named.conf
-sudo named-checkzone est.intra /var/named/est.intra.zone
-sudo named-checkzone 1.168.192.in-addr.arpa /var/named/1.168.192.in-addr.arpa
-```
-
-4. Test the DHCP configuration:
-
-```bash
-sudo dhcpd -t
-```
-
-5. Ensure that SELinux is not blocking the services:
-
-```bash
-sudo ausearch -m avc -ts recent
-```
-
-## Final Notes
-
-This configuration implements Dynamic DNS with DHCP in a VirtualBox environment, allowing clients to automatically register in the DNS zone. The DNS server is configured to accept secure updates from the DHCP server using a shared key.
-
-Remember to adapt interface names (enp0s3, enp0s8) to match your actual VirtualBox network interfaces, which may differ depending on your system.
+This setup creates a fully functioning network with a relay agent connecting the LAN and DMZ networks, with DNS, DHCP, and web services all running on the DMZ server.
