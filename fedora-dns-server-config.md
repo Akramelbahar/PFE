@@ -1,41 +1,15 @@
-# Complete Network Setup Guide: LAN, DMZ, and Relay Agent
+# Complete Configuration Updates for Your Network
 
-I'll provide a comprehensive step-by-step guide to create your network architecture with Fedora servers. This guide covers all necessary configurations without skipping any steps.
+Here are all the necessary updates for each machine in your network setup. I'll provide detailed configurations for each component based on the network interfaces I observed.
 
-## Overview of Network Architecture
-- **LAN Network**: 192.168.1.0/24
-- **DMZ Network**: 192.168.2.0/24
-- **Relay Agent**: Connects both networks (interfaces: enp0s8 and enp0s9)
-- **DMZ Server (192.168.2.1)**: DHCP, DNS (dns.est.intra), Web Server (www.est.intra)
-- **LAN Client**: Obtains IP via DHCP, resolves via dns.est.intra, accesses www.est.intra
+## 1. DMZ Server (192.168.2.1)
 
-## Step 1: Set Up DMZ Server (192.168.2.1)
-
-### 1.1. Basic Server Setup
+### DHCP Configuration
 ```bash
-# Update the system
-sudo dnf update -y
-
-# Set hostname
-sudo hostnamectl set-hostname dmz-server.est.intra
-
-# Configure networking for static IP
-sudo nmcli connection add type ethernet con-name dmz-network ifname enp0s8 ip4 192.168.2.1/24
-sudo nmcli connection modify dmz-network ipv4.method manual
-sudo nmcli connection up dmz-network
-```
-
-### 1.2. DHCP Server Setup
-```bash
-# Install DHCP server
-sudo dnf install -y dhcp-server
-
-# Configure DHCP server
-sudo cp /etc/dhcp/dhcpd.conf /etc/dhcp/dhcpd.conf.bak
 sudo nano /etc/dhcp/dhcpd.conf
 ```
 
-Add this content to dhcpd.conf:
+Replace the content with:
 ```
 # Global DHCP configuration
 ddns-update-style interim;
@@ -45,24 +19,20 @@ ddns-updates on;
 ignore client-updates;
 update-static-leases on;
 
-# Authorization
-allow booting;
-allow bootp;
-
-# DHCP for LAN subnet
+# LAN Subnet
 subnet 192.168.1.0 netmask 255.255.255.0 {
   range 192.168.1.100 192.168.1.200;
-  option routers 192.168.1.10;
+  option routers 192.168.1.10;  # Relay LAN interface
   option domain-name "est.intra";
   option domain-name-servers 192.168.2.1;
   default-lease-time 3600;
   max-lease-time 7200;
 }
 
-# DHCP for DMZ subnet
+# DMZ Subnet
 subnet 192.168.2.0 netmask 255.255.255.0 {
   range 192.168.2.100 192.168.2.200;
-  option routers 192.168.2.10;
+  option routers 192.168.2.10;  # Relay DMZ interface
   option domain-name "est.intra";
   option domain-name-servers 192.168.2.1;
   default-lease-time 3600;
@@ -70,24 +40,18 @@ subnet 192.168.2.0 netmask 255.255.255.0 {
 }
 ```
 
-Start and enable the DHCP service:
+Restart DHCP:
 ```bash
-sudo systemctl start dhcpd
-sudo systemctl enable dhcpd
+sudo systemctl restart dhcpd
 sudo systemctl status dhcpd
 ```
 
-### 1.3. DNS Server Setup
+### DNS Configuration
 ```bash
-# Install DNS server
-sudo dnf install -y bind bind-utils
-
-# Configure main DNS configuration
-sudo cp /etc/named.conf /etc/named.conf.bak
 sudo nano /etc/named.conf
 ```
 
-Replace the content with:
+Make sure it contains:
 ```
 options {
     listen-on port 53 { 127.0.0.1; 192.168.2.1; };
@@ -96,25 +60,15 @@ options {
     dump-file "/var/named/data/cache_dump.db";
     statistics-file "/var/named/data/named_stats.txt";
     memstatistics-file "/var/named/data/named_mem_stats.txt";
-    secroots-file "/var/named/data/named.secroots";
-    recursing-file "/var/named/data/named.recursing";
     
     allow-query { localhost; 192.168.1.0/24; 192.168.2.0/24; };
     allow-transfer { localhost; };
     
     recursion yes;
-    dnssec-enable yes;
     dnssec-validation yes;
     
     /* For DDNS */
     allow-update { 192.168.2.1; };
-    
-    managed-keys-directory "/var/named/dynamic";
-    pid-file "/run/named/named.pid";
-    session-keyfile "/run/named/session.key";
-    
-    /* https://fedoraproject.org/wiki/Changes/CryptoPolicy */
-    include "/etc/crypto-policies/back-ends/bind.config";
 };
 
 logging {
@@ -154,16 +108,16 @@ zone "2.168.192.in-addr.arpa" IN {
 };
 ```
 
-Create forward zone file:
+Update DNS zone files:
 ```bash
 sudo nano /var/named/est.intra.zone
 ```
 
-Add this content:
+Add:
 ```
 $TTL 86400
 @       IN      SOA     dns.est.intra. admin.est.intra. (
-                        2024031901      ; Serial
+                        2024031902      ; Serial
                         3600            ; Refresh
                         1800            ; Retry
                         604800          ; Expire
@@ -174,20 +128,22 @@ $TTL 86400
 
 dns     IN      A       192.168.2.1
 www     IN      A       192.168.2.1
+
+; Relay agent entries
 relay   IN      A       192.168.2.10
 lan-relay IN    A       192.168.1.10
 ```
 
-Create reverse zone for 192.168.1.0/24:
+Update reverse zone files:
 ```bash
 sudo nano /var/named/1.168.192.in-addr.arpa.zone
 ```
 
-Add this content:
+Add:
 ```
 $TTL 86400
 @       IN      SOA     dns.est.intra. admin.est.intra. (
-                        2024031901      ; Serial
+                        2024031902      ; Serial
                         3600            ; Refresh
                         1800            ; Retry
                         604800          ; Expire
@@ -197,16 +153,15 @@ $TTL 86400
 10      IN      PTR     lan-relay.est.intra.
 ```
 
-Create reverse zone for 192.168.2.0/24:
 ```bash
 sudo nano /var/named/2.168.192.in-addr.arpa.zone
 ```
 
-Add this content:
+Add:
 ```
 $TTL 86400
 @       IN      SOA     dns.est.intra. admin.est.intra. (
-                        2024031901      ; Serial
+                        2024031902      ; Serial
                         3600            ; Refresh
                         1800            ; Retry
                         604800          ; Expire
@@ -218,48 +173,21 @@ $TTL 86400
 10      IN      PTR     relay.est.intra.
 ```
 
-Set proper permissions:
+Set correct permissions and restart DNS:
 ```bash
 sudo chown named:named /var/named/est.intra.zone
 sudo chown named:named /var/named/1.168.192.in-addr.arpa.zone
 sudo chown named:named /var/named/2.168.192.in-addr.arpa.zone
-sudo chmod 644 /var/named/est.intra.zone
-sudo chmod 644 /var/named/1.168.192.in-addr.arpa.zone
-sudo chmod 644 /var/named/2.168.192.in-addr.arpa.zone
-```
-
-Start and enable DNS service:
-```bash
-sudo systemctl start named
-sudo systemctl enable named
+sudo systemctl restart named
 sudo systemctl status named
 ```
 
-Verify DNS configuration:
+### Web Server Configuration
 ```bash
-sudo named-checkconf
-sudo named-checkzone est.intra /var/named/est.intra.zone
-sudo named-checkzone 1.168.192.in-addr.arpa /var/named/1.168.192.in-addr.arpa.zone
-sudo named-checkzone 2.168.192.in-addr.arpa /var/named/2.168.192.in-addr.arpa.zone
-```
-
-### 1.4. Web Server Setup
-```bash
-# Install Apache, PHP, and MariaDB
-sudo dnf install -y httpd php php-mysqlnd mariadb-server
-
-# Start and enable MariaDB
-sudo systemctl start mariadb
-sudo systemctl enable mariadb
-
-# Secure MariaDB installation (follow the prompts)
-sudo mysql_secure_installation
-
-# Configure Apache
 sudo nano /etc/httpd/conf.d/est.intra.conf
 ```
 
-Add this content:
+Add:
 ```
 <VirtualHost *:80>
     ServerName www.est.intra
@@ -282,7 +210,7 @@ sudo mkdir -p /var/www/html/est.intra
 sudo nano /var/www/html/est.intra/index.php
 ```
 
-Add this PHP code:
+Add:
 ```php
 <?php
 echo "<h1>Welcome to www.est.intra!</h1>";
@@ -293,372 +221,110 @@ phpinfo();
 ?>
 ```
 
-Set proper permissions:
+Set permissions and restart Apache:
 ```bash
 sudo chown -R apache:apache /var/www/html/est.intra
 sudo restorecon -R /var/www/html/est.intra
-```
-
-Start and enable Apache:
-```bash
-sudo systemctl start httpd
-sudo systemctl enable httpd
+sudo systemctl restart httpd
 sudo systemctl status httpd
 ```
 
-### 1.5. Firewall Configuration for DMZ Server
+### DMZ Server Firewall
 ```bash
-# Allow necessary services through the firewall
-sudo firewall-cmd --permanent --add-service=dns
 sudo firewall-cmd --permanent --add-service=dhcp
+sudo firewall-cmd --permanent --add-service=dns
 sudo firewall-cmd --permanent --add-service=http
 sudo firewall-cmd --reload
 ```
 
-## Step 2: Set Up Relay Agent
+## 2. Relay Agent Machine (192.168.1.10 and 192.168.2.10)
 
-### 2.1. Basic Server Setup
+### IP Forwarding
 ```bash
-# Update the system
-sudo dnf update -y
-
-# Set hostname
-sudo hostnamectl set-hostname relay.est.intra
-
-# Configure network interfaces
-# First interface (LAN - 192.168.1.10)
-sudo nmcli connection add type ethernet con-name lan-network ifname enp0s8 ip4 192.168.1.10/24
-sudo nmcli connection modify lan-network ipv4.method manual
-
-# Second interface (DMZ - 192.168.2.10)
-sudo nmcli connection add type ethernet con-name dmz-network ifname enp0s9 ip4 192.168.2.10/24
-sudo nmcli connection modify dmz-network ipv4.method manual
-
-# Activate connections
-sudo nmcli connection up lan-network
-sudo nmcli connection up dmz-network
-```
-
-### 2.2. Configure IP Forwarding
-```bash
-# Enable IP forwarding
-sudo sysctl -w net.ipv4.ip_forward=1
-sudo echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
-sudo sysctl -p
-```
-
-### 2.3. Install and Configure DHCP Relay
-```bash
-# Install DHCP relay
-sudo dnf install -y dhcp-relay
-
-# Configure DHCP relay
-sudo nano /etc/sysconfig/dhcrelay
-```
-
-Add this content:
-```
-# Point to the DHCP server and specify interfaces
-DHCRELAY_OPTS="-d --no-pid -i enp0s8 -i enp0s9 192.168.2.1"
-```
-
-Start and enable DHCP relay:
-```bash
-sudo systemctl daemon-reload
-sudo systemctl start dhcrelay
-sudo systemctl enable dhcrelay
-sudo systemctl status dhcrelay
-```
-
-### 2.4. Firewall Configuration for Relay Agent
-```bash
-# Configure firewall to allow traffic between networks
-sudo firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -i enp0s8 -o enp0s9 -j ACCEPT
-sudo firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -i enp0s9 -o enp0s8 -j ACCEPT
-
-# Allow DHCP traffic
-sudo firewall-cmd --permanent --add-service=dhcp
-sudo firewall-cmd --reload
-```
-
-## Step 3: Set Up LAN Client
-
-### 3.1. Basic Client Setup
-```bash
-# Update the system
-sudo dnf update -y
-
-# Set hostname
-sudo hostnamectl set-hostname client.est.intra
-
-# Configure network to use DHCP
-sudo nmcli connection add type ethernet con-name lan-client ifname enp0s8
-sudo nmcli connection modify lan-client ipv4.method auto
-sudo nmcli connection up lan-client
-```
-
-## Step 4: Testing the Setup
-
-### 4.1. Test DNS Resolution on DMZ Server
-```bash
-# Verify DNS is working
-dig dns.est.intra @192.168.2.1
-dig www.est.intra @192.168.2.1
-dig -x 192.168.2.1 @192.168.2.1
-```
-
-### 4.2. Test DHCP on LAN Client
-```bash
-# Verify client received IP from DHCP
-ip addr show
-cat /etc/resolv.conf
-```
-
-### 4.3. Test DNS Resolution on LAN Client
-```bash
-# Test DNS resolution from client
-nslookup dns.est.intra
-nslookup www.est.intra
-```
-
-### 4.4. Test Web Access on LAN Client
-```bash
-# Test access to web server
-curl www.est.intra
-```
-
-Or open a browser and navigate to http://www.est.intra
-
-## Troubleshooting Tips
-
-### If DHCP Relay Fails
-```bash
-# Check status and logs
-sudo systemctl status dhcrelay
-sudo journalctl -xe -u dhcrelay
-
-# Verify interface names
-ip addr show
-```
-
-### If DNS Resolution Fails
-```bash
-# Check DNS server status
-sudo systemctl status named
-sudo journalctl -xe -u named
-
-# Test DNS resolution directly
-dig dns.est.intra @192.168.2.1
-```
-
-### If Web Server Access Fails
-```bash
-# Check web server status
-sudo systemctl status httpd
-sudo journalctl -xe -u httpd
-
-# Check SELinux status
-sudo sestatus
-
-# If SELinux is causing issues
-sudo setenforce 0  # Temporarily disable
-```
-
-This comprehensive guide covers all the steps needed to set up your network architecture with LAN, DMZ, relay agent, DHCP, DNS, and web services. Follow these steps sequentially to ensure proper configuration.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-HOLD ON 
-
-
-
-I see an interesting situation here. Your DNS query to look up www.est.intra is successfully returning the correct IP address (192.168.2.1), but ping and curl are still failing with name resolution errors.
-
-This suggests that your DNS server is working correctly, but there's a disconnect between your DNS resolution tool and the system utilities. Let's fix this:
-
-1. **Check which resolver your system is using**:
-   ```bash
-   cat /etc/nsswitch.conf | grep hosts
-   ```
-   Look for a line like `hosts: files dns myhostname`
-
-2. **Verify your resolv.conf again** and make sure it hasn't been overwritten:
-   ```bash
-   cat /etc/resolv.conf
-   ```
-   
-3. **Explicitly set DNS server for testing**:
-   ```bash
-   sudo nano /etc/resolv.conf
-   ```
-   Make sure it only contains:
-   ```
-   nameserver 192.168.2.1
-   search est.intra
-   ```
-   Save and exit.
-
-4. **Flush DNS cache**:
-   ```bash
-   sudo systemd-resolve --flush-caches
-   ```
-   
-5. **Try with explicit DNS server**:
-   ```bash
-   ping -c 1 www.est.intra
-   curl --dns-servers 192.168.2.1 www.est.intra
-   ```
-
-6. **Check network connectivity** to the server IP directly:
-   ```bash
-   ping -c 1 192.168.2.1
-   curl http://192.168.2.1
-   ```
-
-7. **Check hosts file** to make sure there are no conflicting entries:
-   ```bash
-   cat /etc/hosts
-   ```
-
-8. **Check NetworkManager DNS override**:
-   ```bash
-   nmcli device show | grep DNS
-   ```
-
-9. **Try temporarily disabling any local DNS caching service**:
-   ```bash
-   sudo systemctl stop systemd-resolved
-   sudo systemctl disable systemd-resolved
-   ```
-
-10. **Edit NetworkManager configuration** to ensure it's not overriding your DNS settings:
-    ```bash
-    sudo nano /etc/NetworkManager/NetworkManager.conf
-    ```
-    Add or ensure these lines are present:
-    ```
-    [main]
-    dns=none
-    ```
-    Then restart NetworkManager:
-    ```bash
-    sudo systemctl restart NetworkManager
-    ```
-
-11. **Test if routing between networks works correctly**:
-    ```bash
-    traceroute 192.168.2.1
-    ```
-
-12. **Check if DNS service on 192.168.2.1 is actually reachable** from your current machine:
-    ```bash
-    nc -zv 192.168.2.1 53
-    ```
-
-After making these changes, test with ping and curl again. If it still doesn't work, please check if your system has any other DNS resolving services running like dnsmasq or resolvconf.
- HOOOOLD 
-
- I see we're still having issues with the dhcrelay service. Let's try a more direct approach by creating a custom systemd service file instead of relying on the default configuration.
-
-Here's what we'll do:
-
-```bash
-# First, let's check the syntax that your version of dhcrelay accepts
-dhcrelay --help
-
-# Now, let's create a custom systemd service file
-sudo nano /etc/systemd/system/dhcrelay.service
-```
-
-Add the following content:
-
-```
-[Unit]
-Description=DHCPv4 Relay Agent
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/sbin/dhcrelay -d -i enp0s3 -i enp0s8 192.168.2.1
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Then reload systemd and try starting the service:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl start dhcrelay
-sudo systemctl status dhcrelay
-```
-
-If this still fails, let's try an even simpler approach by running dhcrelay directly with no options except the target server:
-
-```bash
-sudo nano /etc/systemd/system/dhcrelay.service
-```
-
-Update it to:
-```
-[Unit]
-Description=DHCPv4 Relay Agent
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/sbin/dhcrelay 192.168.2.1
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Then reload and restart:
-```bash
-sudo systemctl daemon-reload
-sudo systemctl start dhcrelay
-sudo systemctl status dhcrelay
-```
-
-If you're still having issues with the dhcrelay service, we can implement a workaround by using IP forwarding alone instead. Since you already have IP forwarding enabled, this might be sufficient for your needs:
-
-```bash
-# Make sure IP forwarding is enabled
 sudo sysctl -w net.ipv4.ip_forward=1
 sudo sh -c 'echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf'
 sudo sysctl -p
+```
 
-# Configure firewall to allow DHCP traffic
+### Direct DHCP Relay (Alternative to dhcrelay)
+Since the dhcrelay service is having issues, we'll use iptables rules to handle DHCP forwarding:
+
+```bash
+# Clear existing rules
+sudo iptables -F
+sudo iptables -t nat -F
+
+# Allow forwarding between interfaces
+sudo iptables -A FORWARD -i enp0s3 -o enp0s8 -j ACCEPT
+sudo iptables -A FORWARD -i enp0s8 -o enp0s3 -j ACCEPT
+
+# Handle DHCP traffic specifically
+sudo iptables -t raw -I PREROUTING -i enp0s3 -p udp --dport 67:68 -j NOTRACK
+sudo iptables -t raw -I PREROUTING -i enp0s8 -p udp --dport 67:68 -j NOTRACK
+sudo iptables -t raw -I OUTPUT -p udp --sport 67:68 -j NOTRACK
+
+# Make DHCP broadcasts reach the server
+sudo iptables -t nat -A PREROUTING -i enp0s3 -p udp --dport 67 -j DNAT --to-destination 192.168.2.1:67
+sudo iptables -t nat -A POSTROUTING -o enp0s8 -p udp --dport 67 -j MASQUERADE
+
+# Save iptables rules
+sudo dnf install -y iptables-services
+sudo systemctl enable iptables
+sudo systemctl start iptables
+sudo service iptables save
+```
+
+### Relay Agent Firewall
+```bash
+sudo firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -i enp0s3 -o enp0s8 -j ACCEPT
+sudo firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -i enp0s8 -o enp0s3 -j ACCEPT
 sudo firewall-cmd --permanent --add-service=dhcp
 sudo firewall-cmd --reload
 ```
 
-The IP forwarding setup may be sufficient for your network to function, especially if your DHCP server is properly configured to handle requests from both networks.
+## 3. LAN Client
+
+### Network Configuration
+```bash
+# Configure network to use DHCP
+sudo nmcli connection add type ethernet con-name lan-network ifname enp0s3
+sudo nmcli connection modify lan-network ipv4.method auto
+sudo nmcli connection modify lan-network ipv4.dns-search "est.intra"
+sudo nmcli connection up lan-network
+```
+
+To force a DHCP renewal:
+```bash
+sudo dhclient -r
+sudo dhclient
+```
+
+## Testing Steps
+
+1. **On DMZ Server**:
+   ```bash
+   sudo systemctl status dhcpd named httpd
+   ```
+
+2. **On Relay Agent**:
+   ```bash
+   # Test forwarding
+   ping -c 2 192.168.2.1 
+   # Check iptables rules
+   sudo iptables -L
+   sudo iptables -t nat -L
+   ```
+
+3. **On LAN Client**:
+   ```bash
+   # Check received IP
+   ip addr show
+   # Check DNS configuration
+   cat /etc/resolv.conf
+   # Test DNS resolution
+   nslookup www.est.intra
+   # Test web access
+   curl www.est.intra
+   ```
+
+These comprehensive configurations address all components of your network setup and should resolve the issues you've been experiencing. The key changes include correctly configuring the DHCP server to handle both networks, setting up proper DNS entries, and implementing direct packet forwarding on the relay agent to bypass the problematic dhcrelay service.
