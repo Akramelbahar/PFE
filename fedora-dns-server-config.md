@@ -339,3 +339,47 @@ sudo ip route del default via 10.0.4.2 dev enp0s9
 # The relay agent doesn't need a default route since it's connecting two networks
 # Just make sure the direct routes to both networks are correct:
 ip route show | grep -v default
+
+
+
+
+
+
+
+
+
+frehgirngir
+I see the issue in your routing table. Your default route on the relay agent is pointing to 192.168.1.10 (itself) via enp0s8, which is incorrect. This is causing a routing loop. Let's fix this:
+
+```bash
+# On the relay agent
+# Remove the incorrect default routes
+sudo ip route del default via 192.168.1.10 dev enp0s8
+sudo ip route del default via 10.0.4.2 dev enp0s9
+
+# The relay agent doesn't need a default route since it's connecting two networks
+# Just make sure the direct routes to both networks are correct:
+ip route show | grep -v default
+```
+
+You should only see direct routes to the networks:
+```
+192.168.1.0/24 dev enp0s3 proto kernel scope link src 192.168.1.10
+192.168.2.0/24 dev enp0s8 proto kernel scope link src 192.168.2.10
+10.0.4.0/24 dev enp0s9 proto kernel scope link src 10.0.4.15
+```
+
+If you need a default route for external internet access, you can add it through another interface, but not through the internal networks:
+
+```bash
+# Only if needed for internet access, add a default route through your external interface
+# For example, if enp0s9 is connected to the internet:
+sudo ip route add default via 10.0.4.2 dev enp0s9
+```
+
+After fixing the routing table, make sure IP forwarding is enabled:
+```bash
+sudo sysctl -w net.ipv4.ip_forward=1
+```
+
+Then try the ping test again from the DMZ server to the LAN interface.
