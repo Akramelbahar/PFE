@@ -1,3 +1,112 @@
+Looking at your network configuration, I can see several issues preventing the relay agent from accessing est.intra and the client from pinging the DNS server. Let me diagnose and provide specific fixes:
+
+## Key Issues
+
+1. **Relay Agent DNS Configuration**: The relay agent isn't properly configured to use the DNS server at 192.168.2.1
+2. **Routing Problems**: There appear to be routing issues preventing proper communication 
+3. **Firewall Rules**: The current firewall configuration may be blocking DNS traffic
+
+Let's address each of these:
+
+## Fixes for Relay Agent
+
+1. **Configure DNS on Relay Agent**:
+```bash
+# Set DNS on relay agent for both interfaces
+sudo nmcli connection modify enp0s3 ipv4.dns 192.168.2.1
+sudo nmcli connection modify enp0s8 ipv4.dns 192.168.2.1
+sudo nmcli connection modify enp0s3 ipv4.dns-search "est.intra"
+sudo nmcli connection modify enp0s8 ipv4.dns-search "est.intra"
+sudo nmcli connection down enp0s3 && sudo nmcli connection up enp0s3
+sudo nmcli connection down enp0s8 && sudo nmcli connection up enp0s8
+```
+
+2. **Fix IP Forwarding and Routing**:
+```bash
+# Ensure IP forwarding is enabled
+sudo sysctl -w net.ipv4.ip_forward=1
+
+# Check direct routes are correct (no default routes to internal networks)
+ip route show
+```
+
+3. **Adjust Firewall to Allow DNS Traffic**:
+```bash
+sudo firewall-cmd --permanent --add-service=dns
+sudo firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -p udp --dport 53 -j ACCEPT
+sudo firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -p tcp --dport 53 -j ACCEPT
+sudo firewall-cmd --reload
+```
+
+## Fixes for LAN Client
+
+1. **DNS Configuration for Client**:
+```bash
+# Make sure client is using the correct DNS
+sudo nmcli connection modify lan-network ipv4.dns 192.168.2.1
+sudo nmcli connection modify lan-network ipv4.dns-search "est.intra"
+sudo nmcli connection down lan-network && sudo nmcli connection up lan-network
+```
+
+2. **Check ICMP Forwarding**:
+```bash
+# On relay agent, ensure ICMP is forwarded
+sudo firewall-cmd --permanent --direct --add-rule ipv4 filter FORWARD 0 -p icmp -j ACCEPT
+sudo firewall-cmd --reload
+```
+
+## Fixes for DNS Server
+
+1. **Update DNS Server Configuration**:
+```bash
+# On the DMZ server (192.168.2.1), modify the named.conf
+sudo nano /etc/named.conf
+```
+
+Update the options block to ensure DNS requests from relay are accepted:
+```
+options {
+    listen-on port 53 { 127.0.0.1; 192.168.2.1; };
+    listen-on-v6 port 53 { ::1; };
+    directory "/var/named";
+    
+    allow-query { localhost; 192.168.1.0/24; 192.168.2.0/24; };
+    allow-recursion { localhost; 192.168.1.0/24; 192.168.2.0/24; };
+    
+    recursion yes;
+    
+    /* For DDNS */
+    allow-update { 192.168.2.1; };
+};
+```
+
+Then restart the DNS service:
+```bash
+sudo systemctl restart named
+```
+
+2. **Check DNS Server Firewall**:
+```bash
+# On DMZ server
+sudo firewall-cmd --permanent --add-service=dns
+sudo firewall-cmd --reload
+```
+
+After applying these changes, test connectivity again:
+
+1. On the relay agent: `nslookup www.est.intra`
+2. On the LAN client: `ping 192.168.2.1` and `nslookup www.est.intra`
+
+These changes should address the connectivity issues between your relay agent, client, and DNS server.
+
+
+
+
+
+
+
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 # Complete Configuration Updates for Your Network
 
 Here are all the necessary updates for each machine in your network setup. I'll provide detailed configurations for each component based on the network interfaces I observed.
