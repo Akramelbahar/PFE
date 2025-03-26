@@ -1,3 +1,106 @@
+If you can't ping from enp0s3 to enp0s8 on the same relay agent, that's a significant issue that needs to be addressed first. This is likely why the client can't reach the DMZ network either.
+
+Let's troubleshoot this internal routing issue:
+
+1. **Check the interface configuration**:
+```bash
+ip addr show enp0s3
+ip addr show enp0s8
+```
+Make sure both interfaces have their correct IP addresses assigned.
+
+2. **Check the local routing table**:
+```bash
+ip route show
+```
+You should see direct routes for both networks.
+
+3. **Check firewall zones**:
+```bash
+sudo firewall-cmd --get-active-zones
+```
+Make sure both interfaces aren't in different zones with restrictive rules.
+
+4. **Try adding explicit firewall rules to allow traffic between interfaces**:
+```bash
+sudo firewall-cmd --permanent --direct --add-rule ipv4 filter INPUT 0 -i enp0s3 -d 192.168.2.10 -j ACCEPT
+sudo firewall-cmd --permanent --direct --add-rule ipv4 filter INPUT 0 -i enp0s8 -d 192.168.1.10 -j ACCEPT
+sudo firewall-cmd --reload
+```
+
+5. **Check for any interface-specific settings**:
+```bash
+sudo sysctl -a | grep net.ipv4.conf
+```
+Look for any settings that might be blocking traffic between interfaces.
+
+6. **Try temporarily disabling the firewall to test**:
+```bash
+sudo systemctl stop firewalld
+```
+Then try pinging between interfaces. If it works, the firewall is the issue.
+
+7. **Check for any custom iptables rules**:
+```bash
+sudo iptables -L -v
+```
+Look for any rules that might be blocking traffic.
+
+8. **Test loopback connectivity**:
+```bash
+ping -c 4 127.0.0.1
+```
+Make sure the basic networking stack is working.
+
+9. **Create a simple test rule to allow all traffic**:
+```bash
+sudo iptables -P FORWARD ACCEPT
+sudo iptables -P INPUT ACCEPT
+sudo iptables -P OUTPUT ACCEPT
+sudo iptables -F
+```
+This will temporarily clear all iptables rules. Try pinging between interfaces after this.
+
+The fact that you can't ping between interfaces on the same machine suggests either a firewall issue or a fundamental networking configuration problem. Once we resolve this, the client should be able to reach the DMZ network as well.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 Looking at your network configuration, I can see several issues preventing the relay agent from accessing est.intra and the client from pinging the DNS server. Let me diagnose and provide specific fixes:
 
 ## Key Issues
